@@ -25,6 +25,9 @@
     "test:coverage": "nyc yarn test",
     "test:types": "tsd"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@percy/sdk-utils": "^1.0.0-beta.69"
   },
