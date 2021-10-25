@@ -2,7 +2,7 @@ const utils = require('@percy/sdk-utils');
 
 // Collect client and environment information
 const sdkPkg = require('./package.json');
-const playwrightPkg = require('playwright/package.json');
+const playwrightPkg = require(require.resolve('./package.json', { paths: [__dirname] }));
 const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 
