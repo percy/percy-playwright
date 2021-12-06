@@ -545,11 +545,6 @@
   resolved "https://registry.yarnpkg.com/@percy/env/-/env-1.0.0-beta.71.tgz#bbe89285817f9a578c3cdfc0d1ee74c5b3d768c7"
   integrity sha512-DPiCL2xuAdaTghziP2XtmaSMp1t3Mb0oo3yEg2HOpTjaPqu/tX9LjI+cJOs2jKf/jIwC3ris3agcafceXiGWZw==
 
-"@percy/logger@1.0.0-beta.70":
-  version "1.0.0-beta.70"
-  resolved "https://registry.yarnpkg.com/@percy/logger/-/logger-1.0.0-beta.70.tgz#1fe0a234ea1d249c3e3667870a31d59de56bf78a"
-  integrity sha512-QUVdp/FEsoHYftakuxe67/e/OVeVX6d2Fgur+thhqgHZ5GD87TwFsB+PH8kP6b5/ZZ+bOysT6bbxbiDvGEqWwg==
-
 "@percy/logger@1.0.0-beta.71":
   version "1.0.0-beta.71"
   resolved "https://registry.yarnpkg.com/@percy/logger/-/logger-1.0.0-beta.71.tgz#03b458b1e43506c08c062f11b46aa2c9b1826fbf"
@@ -563,9 +558,9 @@
     "@percy/logger" "1.0.0-beta.71"
 
 "@playwright/test@^1.16.1":
-  version "1.16.3"
-  resolved "https://registry.yarnpkg.com/@playwright/test/-/test-1.16.3.tgz#99439d07af6a355586393b463fd88315f32d2a57"
-  integrity sha512-aJR6d6Fd/y6lq1RWWggcuiivM7offqddOW3te+NGGMxgF2P0xAxU0/xUurwIFnEp7iHwXILSZByzZ6W6fuKPIg==
+  version "1.17.1"
+  resolved "https://registry.yarnpkg.com/@playwright/test/-/test-1.17.1.tgz#9e5aca496d2c90ce95ca19ac2c3a8867a4f606d3"
+  integrity sha512-mMZS5OMTN/vUlqd1JZkFoAk2FsIZ4/E/00tw5it2c/VF4+3z/aWO+PPd8ShEGzYME7B16QGWNPjyFpDQI1t4RQ==
   dependencies:
     "@babel/code-frame" "^7.14.5"
     "@babel/core" "^7.14.8"
@@ -590,16 +585,18 @@
     expect "=27.2.5"
     jest-matcher-utils "=27.2.5"
     jpeg-js "^0.4.2"
+    mime "^2.4.6"
     minimatch "^3.0.3"
     ms "^2.1.2"
     open "^8.3.0"
     pirates "^4.0.1"
     pixelmatch "^5.2.1"
-    playwright-core "=1.16.3"
+    playwright-core "=1.17.1"
     pngjs "^5.0.0"
     rimraf "^3.0.2"
     source-map-support "^0.4.18"
     stack-utils "^2.0.3"
+    yazl "^2.5.1"
 
 "@tsd/typescript@~4.5.2":
   version "4.5.2"
@@ -2526,6 +2523,28 @@ playwright-core@=1.16.3:
   version "1.16.3"
   resolved "https://registry.yarnpkg.com/playwright-core/-/playwright-core-1.16.3.tgz#f466be9acaffb698654adfb0a17a4906ba936895"
   integrity sha512-16hF27IvQheJee+DbhC941AUZLjbJgfZFWi9YPS4LKEk/lKFhZI+9TiFD0sboYqb9eaEWvul47uR5xxTVbE4iw==
+  dependencies:
+    commander "^8.2.0"
+    debug "^4.1.1"
+    extract-zip "^2.0.1"
+    https-proxy-agent "^5.0.0"
+    jpeg-js "^0.4.2"
+    mime "^2.4.6"
+    pngjs "^5.0.0"
+    progress "^2.0.3"
+    proper-lockfile "^4.1.1"
+    proxy-from-env "^1.1.0"
+    rimraf "^3.0.2"
+    socks-proxy-agent "^6.1.0"
+    stack-utils "^2.0.3"
+    ws "^7.4.6"
+    yauzl "^2.10.0"
+    yazl "^2.5.1"
+
+playwright-core@=1.17.1:
+  version "1.17.1"
+  resolved "https://registry.yarnpkg.com/playwright-core/-/playwright-core-1.17.1.tgz#a16e0f89284a0ed8ae6d77e1c905c84b8a2ba022"
+  integrity sha512-C3c8RpPiC3qr15fRDN6dx6WnUkPLFmST37gms2aoHPDRvp7EaGDPMMZPpqIm/QWB5J40xDrQCD4YYHz2nBTojQ==
   dependencies:
     commander "^8.2.0"
     debug "^4.1.1"
