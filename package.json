@@ -29,14 +29,14 @@
     "access": "public"
   },
   "dependencies": {
-    "@percy/sdk-utils": "^1.0.0-beta.69"
+    "@percy/sdk-utils": "^1.0.0-beta.76"
   },
   "peerDependencies": {
     "playwright": ">=1"
   },
   "devDependencies": {
-    "@percy/core": "^1.0.0-beta.69",
-    "@playwright/test": "^1.19.0",
+    "@percy/core": "^1.0.0-beta.76",
+    "@playwright/test": "^1.20.0",
     "cross-env": "^7.0.2",
     "eslint": "^7.18.0",
     "eslint-config-standard": "^16.0.2",
@@ -45,7 +45,7 @@
     "eslint-plugin-promise": "^5.1.0",
     "eslint-plugin-standard": "^5.0.0",
     "nyc": "^15.1.0",
-    "playwright": "^1.19.0",
+    "playwright": "^1.20.0",
     "tsd": "^0.19.0"
   }
 }
