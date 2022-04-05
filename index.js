@@ -1,5 +1,3 @@
-const utils = require('@percy/sdk-utils');
-
 // Collect client and environment information
 const sdkPkg = require('./package.json');
 const playwrightPkg = require(require.resolve('./package.json', { paths: [__dirname] }));
@@ -8,6 +6,8 @@ const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 
 // Take a DOM snapshot and post it to the snapshot endpoint
 async function percySnapshot(page, name, options) {
+  let utils = await import('@percy/sdk-utils');
+
   if (!page) throw new Error('A Playwright `page` object is required.');
   if (!name) throw new Error('The `name` argument is required.');
   if (!(await utils.isPercyEnabled())) return;
