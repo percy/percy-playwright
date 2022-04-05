@@ -1,6 +1,6 @@
-const { test, expect } = require('@playwright/test');
-const helpers = require('@percy/sdk-utils/test/helpers');
-const percySnapshot = require('..');
+import { helpers } from '@percy/sdk-utils/test/helpers';
+import { test, expect } from '@playwright/test';
+import percySnapshot from '../index.js';
 
 test.describe('percySnapshot', () => {
   test.beforeAll(async function() {
