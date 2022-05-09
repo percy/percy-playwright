@@ -29,13 +29,13 @@
     "access": "public"
   },
   "dependencies": {
-    "@percy/sdk-utils": "^1.0.4"
+    "@percy/sdk-utils": "^1.0.0"
   },
   "peerDependencies": {
     "playwright": ">=1"
   },
   "devDependencies": {
-    "@percy/core": "^1.0.4",
+    "@percy/core": "^1.1.2",
     "@playwright/test": "^1.21.0",
     "cross-env": "^7.0.2",
     "eslint": "^7.18.0",

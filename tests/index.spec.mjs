@@ -1,4 +1,4 @@
-import { helpers } from '@percy/sdk-utils/test/helpers';
+import helpers from '@percy/sdk-utils/test/helpers';
 import { test, expect } from '@playwright/test';
 import percySnapshot from '../index.js';
 
