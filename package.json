@@ -21,7 +21,7 @@
   },
   "scripts": {
     "lint": "eslint --ignore-path .gitignore .",
-    "test": "cross-env NODE_ENV=test playwright test",
+    "test": "cross-env NODE_ENV=test percy exec --testing -- playwright test",
     "test:coverage": "nyc yarn test",
     "test:types": "tsd"
   },
@@ -35,7 +35,7 @@
     "playwright-core": ">=1"
   },
   "devDependencies": {
-    "@percy/core": "^1.1.2",
+    "@percy/cli": "^1.9.1",
     "@playwright/test": "^1.24.2",
     "cross-env": "^7.0.2",
     "eslint": "^7.18.0",
