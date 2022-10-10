@@ -410,12 +410,12 @@
   integrity sha512-X0c1wgtmZ8/+73rNNdTVVdSeKZgDuq8HBP0TMNvbjyc2wuFjLxNuhV7BAqMjmP9d0mncvSfroYI3jbGaGfIJNA==
 
 "@playwright/test@^1.24.2":
-  version "1.26.1"
-  resolved "https://registry.yarnpkg.com/@playwright/test/-/test-1.26.1.tgz#73ada4e70f618bca69ba7509c4ba65b5a41c4b10"
-  integrity sha512-bNxyZASVt2adSZ9gbD7NCydzcb5JaI0OR9hc7s+nmPeH604gwp0zp17NNpwXY4c8nvuBGQQ9oGDx72LE+cUWvw==
+  version "1.27.0"
+  resolved "https://registry.yarnpkg.com/@playwright/test/-/test-1.27.0.tgz#a5327a4823837a718ae6fad9b1e5ff520927e834"
+  integrity sha512-L4BswoJvGkFsEHhEgzVNHBnkFB1FbnBQn3QmvTl7+AouoJQ4a8tLwZKvytdovCsNi7B5cXuRo58yGvfM5PnExw==
   dependencies:
     "@types/node" "*"
-    playwright-core "1.26.1"
+    playwright-core "1.27.0"
 
 "@tsd/typescript@~4.8.3":
   version "4.8.3"
