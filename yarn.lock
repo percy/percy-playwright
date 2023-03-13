@@ -417,10 +417,10 @@
     "@types/node" "*"
     playwright-core "1.27.1"
 
-"@tsd/typescript@~4.9.3":
-  version "4.9.4"
-  resolved "https://registry.yarnpkg.com/@tsd/typescript/-/typescript-4.9.4.tgz#03ddbae4249621ee83bd496e701e6fec3c3d9944"
-  integrity sha512-70j1vy95LsMvciXWJLrQ9pQaaG1inJJ+gZ/dW/bPdzHUH1VTeSl3BBU6QxqFWh5IjPy6s7xHcUw45R71dw4J3w==
+"@tsd/typescript@~4.9.5":
+  version "4.9.5"
+  resolved "https://registry.yarnpkg.com/@tsd/typescript/-/typescript-4.9.5.tgz#85daafcf51f4af92bd8caf0e82b655ceaf948f99"
+  integrity sha512-+UgxOvJUl5rQdPFSSOOwhmSmpThm8DJ3HwHxAOq5XYe7CcmG1LcM2QeqWwILzUIT5tbeMqY8qABiCsRtIjk/2g==
 
 "@types/eslint@^7.2.13":
   version "7.28.2"
@@ -2571,12 +2571,12 @@ tsconfig-paths@^3.14.1:
     minimist "^1.2.6"
     strip-bom "^3.0.0"
 
-tsd@^0.25.0:
-  version "0.25.0"
-  resolved "https://registry.yarnpkg.com/tsd/-/tsd-0.25.0.tgz#bed2a937ab414e1c5ae1ca687bb44ea3a6f549ba"
-  integrity sha512-liUlvKtsdr+70XEZP/kkF6U8+Q9URZi4Pw58ih7a9x3kjJblG8rdVgvG62xcvkgRva1q3yWX5qAxfYZuYiC5CA==
+tsd@^0.27.0:
+  version "0.27.0"
+  resolved "https://registry.yarnpkg.com/tsd/-/tsd-0.27.0.tgz#5f02d6e75cac36d9db7fe4e52109284ace1268b8"
+  integrity sha512-G/2Sejk9N21TcuWlHwrvVWwIyIl2mpECFPbnJvFMsFN1xQCIbi2QnvG4fkw3VitFhNF6dy38cXxKJ8Paq8kOGQ==
   dependencies:
-    "@tsd/typescript" "~4.9.3"
+    "@tsd/typescript" "~4.9.5"
     eslint-formatter-pretty "^4.1.0"
     globby "^11.0.1"
     meow "^9.0.0"
