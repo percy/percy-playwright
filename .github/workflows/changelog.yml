@@ -1,7 +1,7 @@
 name: Changelog
 on:
   push:
-    branches: [main]
+    branches: [master]
 jobs:
   update_draft:
     runs-on: ubuntu-latest
