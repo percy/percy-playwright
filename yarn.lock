@@ -407,9 +407,9 @@
   integrity sha512-EVwPoUJWm2ESn3Llorc6D3mqwQeALgaDerlsXA7JvKOk2Xaf68CRk5akI8NBN6rZoWIx8t5WjjJksGzPvMYYnw==
 
 "@percy/sdk-utils@^1.0.0":
-  version "1.26.2"
-  resolved "https://registry.yarnpkg.com/@percy/sdk-utils/-/sdk-utils-1.26.2.tgz#1a02b00f63c6244b10c0c5151901d5b41ea7ca47"
-  integrity sha512-sqxex+UnUoKN046jZS8UHB1YnQuJ0/lzMQaCdNKrF1F/U/1j/LrGywjXI9+NsGa29FdcZfU17530qt961sPgow==
+  version "1.27.5"
+  resolved "https://registry.yarnpkg.com/@percy/sdk-utils/-/sdk-utils-1.27.5.tgz#4c69177a3fbb47c22fefcc971333c288a99d3f4a"
+  integrity sha512-MoL/PegKdx9xPgxmvG3xuEMBUYwKO3s/8CnqFXvLNURc5Es6XRqCol7SDI/scsQSpkOaUKc/0rYhmMCRQOt+EA==
 
 "@playwright/test@^1.24.2":
   version "1.27.1"
