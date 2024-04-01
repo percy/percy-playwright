@@ -28,14 +28,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "@percy/sdk-utils": "^1.0.0"
-  },
   "peerDependencies": {
     "playwright-core": ">=1"
   },
   "devDependencies": {
-    "@percy/cli": "^1.10.4",
+    "@percy/cli": "^1.28.2",
     "@playwright/test": "^1.24.2",
     "cross-env": "^7.0.2",
     "eslint": "^7.18.0",
