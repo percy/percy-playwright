@@ -25,7 +25,7 @@ async function percySnapshot(page, name, options) {
     }, options);
 
     // Post the DOM to the snapshot endpoint with snapshot options and other info
-    await utils.postSnapshot({
+    const response = await utils.postSnapshot({
       ...options,
       environmentInfo: ENV_INFO,
       clientInfo: CLIENT_INFO,
@@ -33,6 +33,7 @@ async function percySnapshot(page, name, options) {
       domSnapshot,
       name
     });
+    return response?.body?.data;
   } catch (err) {
     log.error(`Could not take DOM snapshot "${name}"`);
     log.error(err);

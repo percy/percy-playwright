@@ -30,13 +30,15 @@ test.describe('percySnapshot', () => {
   test('posts snapshots to the local percy server', async ({ page }) => {
     await percySnapshot(page, 'Snapshot 1');
     await percySnapshot(page, 'Snapshot 2');
+    await percySnapshot(page, 'Snapshot 3', { sync: true });
 
     expect(await helpers.get('logs')).toEqual(expect.arrayContaining([
       'Snapshot found: Snapshot 1',
       'Snapshot found: Snapshot 2',
       `- url: ${helpers.testSnapshotURL}`,
       expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/)
+      expect.stringMatching(/environmentInfo: playwright\/.+/),
+      expect.stringMatching(/The Synchronous CLI functionality is not compatible with skipUploads option./)
     ]));
   });
 
