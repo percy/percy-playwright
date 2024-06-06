@@ -1,5 +1,3 @@
-const { Undefined } = require('./validations');
-
 class Cache {
   static cache = {};
 
@@ -10,7 +8,7 @@ class Cache {
 
   static async withCache(store, key, func, cacheExceptions = false) {
     this.maintain();
-    if (Undefined(this.cache[store])) this.cache[store] = {};
+    if (this.cache[store] === undefined) this.cache[store] = {};
 
     store = this.cache[store];
     if (store[key]) {
