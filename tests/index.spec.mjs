@@ -113,4 +113,15 @@ test.describe('percyScreenshot', () => {
     expect(captureAutomateScreenshotStub.calledWith(expectedData)).toBe(true)
   });
 
+  test('logs error if anything fails', async ({ page }) => {
+    sinon.stub(Utils, 'projectType').returns('automate')
+    sinon.stub(page, 'evaluate').returns(JSON.stringify({hashed_id: 'abc'}))
+    sinon.stub(Utils, 'captureAutomateScreenshot').throws(new Error('Some error'))
+    await percyScreenshot(page, 'Snapshot 1');
+    expect(helpers.logger.stderr).toEqual(expect.arrayContaining([
+      '[percy] Could not take percy screenshot "Snapshot 1"',
+      '[percy] Error: Some error'
+    ]));
+  });
+
 });
