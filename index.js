@@ -1,5 +1,4 @@
 const utils = require('@percy/sdk-utils');
-const { Cache } = require('./cache');
 const { Utils } = require('./utils');
 
 // Collect client and environment information
@@ -52,7 +51,7 @@ async function percyScreenshot(page, name, options) {
   }
 
   try {
-    const sessionDetails = await getSessionId(page);
+    const sessionDetails = await Utils.getSessionId(page);
     const sessionId = sessionDetails.hashed_id;
     const pageGuid = page._guid;
     const frameGuid = page._mainFrame._guid;
@@ -72,15 +71,6 @@ async function percyScreenshot(page, name, options) {
     log.error(`Could not take percy screenshot "${name}"`);
     log.error(err);
   }
-}
-
-async function getSessionId(page) {
-  /* It is browser's guid maintained by playwright, considering it is unique for one automate session
-   will use it to cache the session details */
-  const browserId = page._parent._parent._guid;
-  return await Cache.withCache(Cache.sessionId, browserId, async () => {
-    return JSON.parse(await page.evaluate(_ => { }, `browserstack_executor: ${JSON.stringify({ action: 'getSessionDetails' })}`));
-  });
 }
 
 module.exports = { percySnapshot, percyScreenshot, CLIENT_INFO, ENV_INFO };
