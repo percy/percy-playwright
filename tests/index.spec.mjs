@@ -1,7 +1,7 @@
 import helpers from '@percy/sdk-utils/test/helpers';
 import { test, expect } from '@playwright/test';
 import { percySnapshot, percyScreenshot, ENV_INFO, CLIENT_INFO } from '../index.js';
-import sinon from 'sinon'
+import sinon from 'sinon';
 import { Utils } from '../utils.js';
 
 test.describe('percySnapshot', () => {
@@ -95,9 +95,9 @@ test.describe('percyScreenshot', () => {
   });
 
   test('calls captureAutomateScreenshot with correct data', async ({ page }) => {
-    sinon.stub(Utils, 'projectType').returns('automate')
-    sinon.stub(page, 'evaluate').returns(JSON.stringify({hashed_id: 'abc'}))
-    const captureAutomateScreenshotStub = sinon.stub(Utils, 'captureAutomateScreenshot').returns({body: {data: "response"}})
+    sinon.stub(Utils, 'projectType').returns('automate');
+    sinon.stub(Utils, 'sessionDetails').returns({ hashed_id: 'abc' });
+    const captureAutomateScreenshotStub = sinon.stub(Utils, 'captureAutomateScreenshot').returns({ body: { data: 'response' } });
     const result = await percyScreenshot(page, 'Snapshot 1');
     expect(result).toBe('response');
     const expectedData = {
@@ -110,18 +110,17 @@ test.describe('percyScreenshot', () => {
       snapshotName: 'Snapshot 1',
       options: undefined
     };
-    expect(captureAutomateScreenshotStub.calledWith(expectedData)).toBe(true)
+    expect(captureAutomateScreenshotStub.calledWith(expectedData)).toBe(true);
   });
 
   test('logs error if anything fails', async ({ page }) => {
-    sinon.stub(Utils, 'projectType').returns('automate')
-    sinon.stub(page, 'evaluate').returns(JSON.stringify({hashed_id: 'abc'}))
-    sinon.stub(Utils, 'captureAutomateScreenshot').throws(new Error('Some error'))
+    sinon.stub(Utils, 'projectType').returns('automate');
+    sinon.stub(Utils, 'sessionDetails').returns({ hashed_id: 'abc' });
+    sinon.stub(Utils, 'captureAutomateScreenshot').throws(new Error('Some error'));
     await percyScreenshot(page, 'Snapshot 1');
     expect(helpers.logger.stderr).toEqual(expect.arrayContaining([
       '[percy] Could not take percy screenshot "Snapshot 1"',
       '[percy] Error: Some error'
     ]));
   });
-
 });

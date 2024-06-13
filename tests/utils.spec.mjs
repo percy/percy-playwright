@@ -1,25 +1,25 @@
-import sinon from "sinon";
-import { test, expect } from "@playwright/test";
-import { Utils } from "../utils.js";
-import utils from "@percy/sdk-utils";
-import { Cache } from "../cache.js";
+import sinon from 'sinon';
+import { test, expect } from '@playwright/test';
+import { Utils } from '../utils.js';
+import utils from '@percy/sdk-utils';
+import { Cache } from '../cache.js';
 
-test.describe("Utils", () => {
+test.describe('Utils', () => {
   test.afterEach(() => {
     sinon.restore();
   });
-  test.describe("projectType", () => {
-    test("should return the project type", () => {
-      const type = "automate";
-      sinon.stub(utils.percy, "type").value(type);
+  test.describe('projectType', () => {
+    test('should return the project type', () => {
+      const type = 'automate';
+      sinon.stub(utils.percy, 'type').value(type);
 
       const result = Utils.projectType();
 
       expect(result).toEqual(type);
     });
 
-    test("should return undefined if project type is not available", () => {
-      sinon.stub(utils.percy, "type").value(undefined);
+    test('should return undefined if project type is not available', () => {
+      sinon.stub(utils.percy, 'type').value(undefined);
 
       const result = Utils.projectType();
 
@@ -27,8 +27,8 @@ test.describe("Utils", () => {
     });
   });
 
-  test.describe("captureAutomateScreenshot", () => {
-    test("should capture an automated screenshot", async () => {
+  test.describe('captureAutomateScreenshot', () => {
+    test('should capture an automated screenshot', async () => {
       const data = { abc: true };
       const spy = sinon.spy(utils.captureAutomateScreenshot);
       try {
@@ -38,58 +38,45 @@ test.describe("Utils", () => {
     });
   });
 
-  test.describe("getSessionId", () => {
+  test.describe('sessionDetails', () => {
     let page;
 
     test.beforeEach(() => {
+      // Mocking page object
       page = {
         _parent: {
           _parent: {
-            _guid: "browserId",
-          },
+            _guid: 'mockBrowserGuid'
+          }
         },
-        evaluate: sinon.stub(),
+        evaluate: async () => {}
       };
-      Cache.cache[Cache.sessionId] = {};
     });
 
     test.afterEach(() => {
       sinon.restore();
-      Cache.reset();
+      Cache.cleanupCache();
     });
 
-    test("should return sessionId from cache if available", async () => {
-      const sessionId = "fakeSessionId";
-      Cache.cache[Cache.sessionId]["browserId"] = {
-        success: true,
-        val: "fakeSessionId",
-      };
+    test('should return session details from cache if available', async () => {
+      const getCacheStub = sinon.stub(Cache, 'getCache').returns({ mockSessionDetails: 'cachedDetails' });
 
-      const result = await Utils.getSessionId(page);
+      const result = await Utils.sessionDetails(page);
 
-      expect(result).toEqual(sessionId);
+      expect(result).toEqual({ mockSessionDetails: 'cachedDetails' });
+      expect(getCacheStub.calledWith('mockBrowserGuid', 'sessionDetails')).toBe(true);
     });
 
-    test("should evaluate page to get sessionId if not in cache", async () => {
-      const hashedId = "fakeSessionId";
-      page.evaluate.resolves(JSON.stringify({ hashed_id: hashedId }));
+    test('should fetch and cache session details if not available in cache', async () => {
+      sinon.stub(Cache, 'getCache').returns(null);
+      const setCacheStub = sinon.stub(Cache, 'setCache');
+      const evaluateStub = sinon.stub(page, 'evaluate').resolves('{"mockSessionDetails": "fetchedDetails"}');
 
-      const result = await Utils.getSessionId(page);
+      const result = await Utils.sessionDetails(page);
 
-      expect(result).toEqual({ hashed_id: hashedId });
-    });
-
-    test("should throw error if page evaluation fails", async () => {
-      const error = new Error("Evaluation error");
-      page.evaluate.rejects(error);
-
-      try {
-        await Utils.getSessionId(page);
-        // The above line should throw an error, so we should not reach this point.
-        expect.fail("Expected an error to be thrown");
-      } catch (e) {
-        expect(e).toEqual(error);
-      }
+      expect(result).toEqual({ mockSessionDetails: 'fetchedDetails' });
+      expect(evaluateStub.calledOnce).toBe(true);
+      expect(setCacheStub.calledWith('mockBrowserGuid', 'sessionDetails', { mockSessionDetails: 'fetchedDetails' })).toBe(true);
     });
   });
 });

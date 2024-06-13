@@ -1,58 +1,48 @@
 class Cache {
-  static cache = {};
+  static CACHE = {};
+  static CACHE_TIMEOUT = 5 * 60; // 300 seconds
+  static TIMEOUT_KEY = 'last_access_time';
 
-  static sessionId = 'session_id';
+  // Caching Keys
+  static sessionDetails = 'sessionDetails';
 
-  static lastTime = Date.now();
-  static timeout = 5 * 60 * 1000;
-
-  static async withCache(store, key, func, cacheExceptions = false) {
-    this.maintain();
-    if (this.cache[store] === undefined) this.cache[store] = {};
-
-    store = this.cache[store];
-    if (store[key]) {
-      if (store[key].success) {
-        return store[key].val;
-      } else {
-        throw store[key].val;
-      }
+  static checkTypes(sessionId, property) {
+    if (typeof sessionId !== 'string') {
+      throw new TypeError('Argument sessionId should be a string');
     }
-
-    const obj = { success: false, val: null, time: Date.now() };
-    try {
-      obj.val = await func();
-      obj.success = true;
-    } catch (e) {
-      obj.val = e;
+    if (typeof property !== 'string') {
+      throw new TypeError('Argument property should be a string');
     }
+  }
 
-    // We seem to have correct coverage for both flows but nyc is marking it as missing
-    // branch coverage anyway
+  static setCache(sessionId, property, value) {
+    this.checkTypes(sessionId, property);
+    let session = this.CACHE[sessionId] || {};
+    session[this.TIMEOUT_KEY] = Math.floor(Date.now() / 1000);
+    session[property] = value;
+    this.CACHE[sessionId] = session;
+  }
+
+  static getCache(sessionId, property) {
+    this.cleanupCache();
+    this.checkTypes(sessionId, property);
+    /* Below line is covered even then nyc is not able to consider it as coverage */
     /* istanbul ignore next */
-    if (obj.success || cacheExceptions) {
-      store[key] = obj;
-    }
-
-    if (!obj.success) throw obj.val;
-    return obj.val;
+    let session = this.CACHE[sessionId] || {};
+    return session[property] || null;
   }
 
-  static maintain() {
-    if (this.lastTime + this.timeout > Date.now()) return;
-
-    for (const [, store] of Object.entries(this.cache)) {
-      for (const [key, item] of Object.entries(store)) {
-        if (item.time + this.timeout < Date.now()) {
-          delete store[key];
-        }
+  static cleanupCache() {
+    let now = Math.floor(Date.now() / 1000);
+    for (let sessionId in this.CACHE) {
+      let session = this.CACHE[sessionId];
+      let timestamp = session[this.TIMEOUT_KEY];
+      if (now - timestamp >= this.CACHE_TIMEOUT) {
+        this.CACHE[sessionId] = {
+          [this.sessionDetails]: session[this.sessionDetails]
+        };
       }
     }
-    this.lastTime = Date.now();
-  }
-
-  static reset() {
-    this.cache = {};
   }
 }
 

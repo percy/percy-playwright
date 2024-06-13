@@ -1,164 +1,107 @@
-import sinon from "sinon";
-import { test, expect } from "@playwright/test";
-import { Cache } from "../cache.js";
+import { test, expect } from '@playwright/test';
+import { Cache } from '../cache.js';
+import sinon from 'sinon';
 
-test.describe("Cache", () => {
-  const store = "abc";
-  const key = "key";
-
-  test.beforeEach(async () => {
-    Cache.reset();
+test.describe('Cache', () => {
+  test.afterEach(() => {
+    sinon.restore();
+    Cache.cleanupCache();
   });
 
-  test.describe("withCache", () => {
-    test("caches response", async () => {
-      const expectedVal = 123;
-      const func = sinon.stub().returns(expectedVal);
-      let val = await Cache.withCache(store, key, func);
-      expect(func.calledOnce).toBeTruthy;
-      expect(val).toEqual(expectedVal);
+  test.describe('setCache', () => {
+    test('should set cache correctly', () => {
+      const sessionId = 'mockSessionId';
+      const property = 'mockProperty';
+      const value = 'mockValue';
+      const now = 1234567890;
 
-      val = await Cache.withCache(store, key, func);
-      expect(func.calledOnce).toBeTruthy;
-      expect(val).toEqual(expectedVal);
+      // Stub Date.now() to return a fixed value
+      sinon.stub(Date, 'now').returns(now * 1000);
+
+      Cache.setCache(sessionId, property, value);
+
+      expect(Cache.CACHE[sessionId]).toEqual({
+        [Cache.TIMEOUT_KEY]: now,
+        [property]: value
+      });
     });
-  });
 
-  test.describe("with different key but same store", () => {
-    test("calls func again and caches it", async () => {
-      const expectedVal = 123;
-      const funcStub = sinon.stub().returns(expectedVal);
-      const key2 = "key2";
+    test('should initialize session to empty object if not found in CACHE', () => {
+      const sessionId = 'nonExistentSessionId';
+      const property = 'mockProperty';
+      sinon.stub(Date, 'now').returns(1234567890 * 1000);
 
-      let val = await Cache.withCache(store, key, funcStub);
-      expect(funcStub.calledOnce).toBeTruthy;
-      expect(val).toEqual(expectedVal);
+      Cache.setCache(sessionId, property, 'mockValue');
 
-      val = await Cache.withCache(store, key2, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy;
-      expect(val).toEqual(expectedVal);
-
-      // test both cache
-      val = await Cache.withCache(store, key, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy; // does not increment
-      expect(val).toEqual(expectedVal);
-
-      val = await Cache.withCache(store, key2, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy; // does not increment
-      expect(val).toEqual(expectedVal);
+      expect(Cache.CACHE[sessionId]).toEqual({ [Cache.TIMEOUT_KEY]: 1234567890, [property]: 'mockValue' });
     });
   });
 
-  test.describe("with different store but same key", () => {
-    test("calls func again and caches it", async () => {
-      const expectedVal = 123;
-      const funcStub = sinon.stub().returns(expectedVal);
-      const store2 = "store2";
+  test.describe('getCache', () => {
+    test('should return null if cache entry does not exist', () => {
+      const sessionId = 'nonExistentSessionId';
+      const property = 'mockProperty';
+      const value = Cache.getCache(sessionId, property);
 
-      let val = await Cache.withCache(store, key, funcStub);
-      expect(funcStub.calledOnce).toBeTruthy;
-      expect(val).toEqual(expectedVal);
-
-      val = await Cache.withCache(store2, key, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy;
-      expect(val).toEqual(expectedVal);
-
-      // test both cache
-      val = await Cache.withCache(store, key, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy; // does not increment
-      expect(val).toEqual(expectedVal);
-
-      val = await Cache.withCache(store2, key, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy; // does not increment
-      expect(val).toEqual(expectedVal);
-    });
-  });
-
-  test.describe("with cacheExceptions", () => {
-    test("caches exceptions", async () => {
-      const expectedError = new Error("Some error");
-      const funcStub = sinon.stub().throws(expectedError);
-
-      let actualError = null;
-      try {
-        await Cache.withCache(store, key, funcStub, true);
-      } catch (e) {
-        actualError = e;
-      }
-
-      expect(funcStub.calledOnce).toBeTruthy;
-      expect(actualError).toEqual(expectedError);
-
-      try {
-        await Cache.withCache(store, key, funcStub, true);
-      } catch (e) {
-        actualError = e;
-      }
-
-      expect(funcStub.calledOnce).toBeTruthy;
-      expect(actualError).toEqual(expectedError);
-    });
-  });
-
-  test.describe("with expired cache", () => {
-    const originalCacheTimeout = Cache.timeout;
-
-    test.beforeAll(() => {
-      Cache.timeout = 7; // 7ms
+      expect(value).toBeNull();
     });
 
-    test.afterAll(() => {
-      Cache.timeout = originalCacheTimeout;
-    });
+    test('should return cached value if cache entry exists', () => {
+      const sessionId = 'existingSessionId';
+      const property = 'mockProperty';
+      const cachedValue = 'cachedValue';
+      const now = 1234567890;
+      sinon.stub(Cache, 'cleanupCache');
 
-    test("calls func again and caches it", async () => {
-      const expectedVal = 123;
-      const funcStub = sinon.stub().returns(expectedVal);
-
-      let val = await Cache.withCache(store, key, funcStub);
-      expect(funcStub.calledOnce).toBeTruthy;
-      expect(val).toEqual(expectedVal);
-
-      // wait for expiry
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      // create a test entry that should not get deleted
-      Cache.cache.random_store = {};
-      Cache.cache.random_store.some_new_key = {
-        val: 1,
-        time: Date.now(),
-        success: true,
+      Cache.CACHE[sessionId] = {
+        [Cache.TIMEOUT_KEY]: now,
+        [property]: cachedValue
       };
 
-      // test expired cache
-      val = await Cache.withCache(store, key, funcStub);
-      expect(funcStub.calledTwice).toBeTruthy;
-      expect(val).toEqual(expectedVal);
+      const value = Cache.getCache(sessionId, property);
 
-      // Not deleted
-      expect(Cache.cache.random_store.some_new_key).toBeOK;
+      expect(value).toEqual(cachedValue);
+    });
+  });
+
+  test.describe('cleanupCache', () => {
+    test('should remove expired cache entries', () => {
+      const sessionId1 = 'expiredSessionId';
+      const sessionId2 = 'validSessionId';
+      const property = 'mockProperty';
+      const now = 1234567890;
+      const expiredTime = now - (Cache.CACHE_TIMEOUT + 1);
+      const validTime = now - (Cache.CACHE_TIMEOUT - 1);
+
+      Cache.CACHE[sessionId1] = {
+        [Cache.TIMEOUT_KEY]: expiredTime,
+        [property]: 'expiredValue'
+      };
+      Cache.CACHE[sessionId2] = {
+        [Cache.TIMEOUT_KEY]: validTime,
+        [property]: 'validValue'
+      };
+
+      sinon.stub(Date, 'now').returns(now * 1000);
+
+      Cache.cleanupCache();
+
+      expect(Cache.CACHE[sessionId1]).toEqual({ sessionDetails: undefined });
+      expect(Cache.CACHE[sessionId2]).toBeDefined();
+    });
+  });
+
+  test.describe('checkTypes', () => {
+    test('should throw TypeError if sessionId is not a string', () => {
+      expect(() => Cache.checkTypes(123, 'property')).toThrowError(TypeError, 'Argument sessionId should be a string');
     });
 
-    test("invalidates all expired keys on any call", async () => {
-      const expectedVal = 123;
-      const funcStub = sinon.stub().returns(expectedVal);
-      const key2 = "key2";
-      const store2 = "store2";
+    test('should throw TypeError if property is not a string', () => {
+      expect(() => Cache.checkTypes('sessionId', 123)).toThrowError(TypeError, 'Argument property should be a string');
+    });
 
-      await Cache.withCache(store, key, funcStub);
-      await Cache.withCache(store, key2, funcStub);
-      await Cache.withCache(store2, key, funcStub);
-
-      // wait for expiry
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      // test expired cache
-      await Cache.withCache(store, key, funcStub);
-      expect(funcStub.callCount).toEqual(4);
-
-      // check internal to avoid calling via withCache
-      expect(Cache.cache[store2][key]).toBeUndefined;
-      expect(Cache.cache[store2][key2]).toBeUndefined;
+    test('should not throw any error if sessionId and property are strings', () => {
+      expect(() => Cache.checkTypes('sessionId', 'property')).not.toThrowError(TypeError);
     });
   });
 });

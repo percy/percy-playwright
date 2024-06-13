@@ -51,7 +51,7 @@ async function percyScreenshot(page, name, options) {
   }
 
   try {
-    const sessionDetails = await Utils.getSessionId(page);
+    const sessionDetails = await Utils.sessionDetails(page);
     const sessionId = sessionDetails.hashed_id;
     const pageGuid = page._guid;
     const frameGuid = page._mainFrame._guid;
