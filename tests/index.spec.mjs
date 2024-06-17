@@ -1,8 +1,9 @@
 import helpers from '@percy/sdk-utils/test/helpers';
 import { test, expect } from '@playwright/test';
-import { percySnapshot, percyScreenshot, ENV_INFO, CLIENT_INFO } from '../index.js';
+import percySnapshot from '../index.js';
 import sinon from 'sinon';
 import { Utils } from '../utils.js';
+const { percyScreenshot, ENV_INFO, CLIENT_INFO } = percySnapshot;
 
 test.describe('percySnapshot', () => {
   test.beforeEach(async ({ page }) => {
