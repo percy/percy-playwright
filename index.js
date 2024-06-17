@@ -9,7 +9,7 @@ const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 const log = utils.logger('playwright');
 
 // Take a DOM snapshot and post it to the snapshot endpoint
-const percySnapshot = async function percySnapshot(page, name, options) {
+const percySnapshot = async function(page, name, options) {
   if (!page) throw new Error('A Playwright `page` object is required.');
   if (!name) throw new Error('The `name` argument is required.');
   if (!(await utils.isPercyEnabled())) return;
@@ -42,7 +42,7 @@ const percySnapshot = async function percySnapshot(page, name, options) {
 };
 
 // Takes Playwright screenshot with Automate
-const percyScreenshot = async function percyScreenshot(page, name, options) {
+const percyScreenshot = async function(page, name, options) {
   if (!page) throw new Error('A Playwright `page` object is required.');
   if (!name) throw new Error('The `name` argument is required.');
   if (!(await utils.isPercyEnabled())) return;
