@@ -1,4 +1,5 @@
 extends: standard
+parser: babel-eslint
 rules:
   prefer-const: off
   no-unused-expressions: off

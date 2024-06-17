@@ -1,17 +1,18 @@
 const utils = require('@percy/sdk-utils');
+const { Utils } = require('./utils');
 
 // Collect client and environment information
 const sdkPkg = require('./package.json');
 const playwrightPkg = require('playwright/package.json');
 const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
+const log = utils.logger('playwright');
 
 // Take a DOM snapshot and post it to the snapshot endpoint
 async function percySnapshot(page, name, options) {
   if (!page) throw new Error('A Playwright `page` object is required.');
   if (!name) throw new Error('The `name` argument is required.');
   if (!(await utils.isPercyEnabled())) return;
-  let log = utils.logger('playwright');
 
   try {
     // Inject the DOM serialization script
@@ -40,4 +41,36 @@ async function percySnapshot(page, name, options) {
   }
 }
 
-module.exports = percySnapshot;
+// Takes Playwright screenshot with Automate
+async function percyScreenshot(page, name, options) {
+  if (!page) throw new Error('A Playwright `page` object is required.');
+  if (!name) throw new Error('The `name` argument is required.');
+  if (!(await utils.isPercyEnabled())) return;
+  if (Utils.projectType() !== 'automate') {
+    throw new Error('Invalid function call - percyScreenshot(). Please use percySnapshot() function for taking screenshot. percyScreenshot() should be used only while using Percy with Automate. For more information on usage of PercySnapshot(), refer doc for your language https://docs.percy.io/docs/end-to-end-testing');
+  }
+
+  try {
+    const sessionDetails = await Utils.sessionDetails(page);
+    const sessionId = sessionDetails.hashed_id;
+    const pageGuid = page._guid;
+    const frameGuid = page._mainFrame._guid;
+    const data = {
+      environmentInfo: ENV_INFO,
+      clientInfo: CLIENT_INFO,
+      sessionId: sessionId,
+      pageGuid: pageGuid,
+      frameGuid: frameGuid,
+      framework: 'playwright',
+      snapshotName: name,
+      options
+    };
+    const response = await Utils.captureAutomateScreenshot(data);
+    return response?.body?.data;
+  } catch (err) {
+    log.error(`Could not take percy screenshot "${name}"`);
+    log.error(err);
+  }
+}
+
+module.exports = { percySnapshot, percyScreenshot, CLIENT_INFO, ENV_INFO };
