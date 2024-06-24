@@ -1,7 +1,7 @@
 {
   "name": "@percy/playwright",
   "description": "Playwright client library for visual testing with Percy",
-  "version": "1.0.6-beta.2",
+  "version": "1.0.6",
   "license": "MIT",
   "author": "Perceptual Inc.",
   "repository": "https://github.com/percy/percy-playwright",
@@ -28,14 +28,13 @@
     "test:types": "tsd"
   },
   "publishConfig": {
-    "access": "public",
-    "tag": "beta"
+    "access": "public"
   },
   "peerDependencies": {
     "playwright-core": ">=1"
   },
   "devDependencies": {
-    "@percy/cli": "^1.28.8-beta.3",
+    "@percy/cli": "^1.28.8",
     "@playwright/test": "^1.24.2",
     "babel-eslint": "^10.1.0",
     "cross-env": "^7.0.2",
