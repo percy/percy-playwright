@@ -28,7 +28,8 @@
     "test:types": "tsd"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "latest"
   },
   "peerDependencies": {
     "playwright-core": ">=1"
