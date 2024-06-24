@@ -106,7 +106,7 @@ const desired_cap = {
 - `page` (**required**) - A `playwright` page instance
 - `name` (**required**) - The snapshot name; must be unique to each snapshot
 - `options` (**optional**) - There are various options supported by percyScreenshot to server further functionality.
-    - `sync` - Boolean value by default it falls back to `false`, Gives the processed result around screenshot [From CLI v1.28.0-beta.0+]
+    - `sync` - Boolean value by default it falls back to `false`, Gives the processed result around screenshot [From CLI v1.28.8+]
     - `fullPage` - Boolean value by default it falls back to `false`, Takes full page screenshot [From CLI v1.27.6+]
     - `freezeAnimatedImage` - Boolean value by default it falls back to `false`, you can pass `true` and percy will freeze image based animations.
     - `freezeImageBySelectors` - List of selectors. Images will be freezed which are passed using selectors. For this to work `freezeAnimatedImage` must be set to true.
