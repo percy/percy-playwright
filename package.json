@@ -1,7 +1,7 @@
 {
   "name": "@percy/playwright",
   "description": "Playwright client library for visual testing with Percy",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "license": "MIT",
   "author": "Perceptual Inc.",
   "repository": "https://github.com/percy/percy-playwright",
