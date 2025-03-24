@@ -181,32 +181,32 @@ test.describe('createRegion', () => {
   });
 
   test('includes carouselsEnabled in configuration if provided', () => {
-    const region = createRegion({ carouselsEnabled: true });
+    const region = createRegion({ algorithm: 'standard', carouselsEnabled: true });
     expect(region.configuration.carouselsEnabled).toBe(true);
   });
 
   test('includes bannersEnabled in configuration if provided', () => {
-    const region = createRegion({ bannersEnabled: true });
+    const region = createRegion({ algorithm: 'standard', bannersEnabled: true });
     expect(region.configuration.bannersEnabled).toBe(true);
   });
 
   test('includes adsEnabled in configuration if provided', () => {
-    const region = createRegion({ adsEnabled: true });
+    const region = createRegion({ algorithm: 'standard', adsEnabled: true });
     expect(region.configuration.adsEnabled).toBe(true);
   });
 
   test('does not include carouselsEnabled in configuration if null', () => {
-    const region = createRegion({ carouselsEnabled: null });
+    const region = createRegion({ algorithm: 'standard', carouselsEnabled: null });
     expect(region.configuration.carouselsEnabled).toBeUndefined();
   });
 
   test('does not include bannersEnabled in configuration if null', () => {
-    const region = createRegion({ bannersEnabled: null });
+    const region = createRegion({ algorithm: 'standard', bannersEnabled: null });
     expect(region.configuration.bannersEnabled).toBeUndefined();
   });
 
   test('does not include adsEnabled in configuration if null', () => {
-    const region = createRegion({ adsEnabled: null });
+    const region = createRegion({ algorithm: 'standard', adsEnabled: null });
     expect(region.configuration.adsEnabled).toBeUndefined();
   });
 });
