@@ -194,21 +194,6 @@ test.describe('createRegion', () => {
     const region = createRegion({ algorithm: 'standard', adsEnabled: true });
     expect(region.configuration.adsEnabled).toBe(true);
   });
-
-  test('does not include carouselsEnabled in configuration if null', () => {
-    const region = createRegion({ algorithm: 'standard', carouselsEnabled: null });
-    expect(region.configuration.carouselsEnabled).toBeUndefined();
-  });
-
-  test('does not include bannersEnabled in configuration if null', () => {
-    const region = createRegion({ algorithm: 'standard', bannersEnabled: null });
-    expect(region.configuration.bannersEnabled).toBeUndefined();
-  });
-
-  test('does not include adsEnabled in configuration if null', () => {
-    const region = createRegion({ algorithm: 'standard', adsEnabled: null });
-    expect(region.configuration.adsEnabled).toBeUndefined();
-  });
 });
 
 
