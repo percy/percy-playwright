@@ -131,6 +131,68 @@ const desired_cap = {
         - `bottom` (int): Bottom coordinate of the consider region.
         - `left` (int): Left coordinate of the consider region.
         - `right` (int): Right coordinate of the consider region.
+    - `regions` parameter that allows users to apply snapshot options to specific areas of the page. This parameter is an array where each object defines a custom region with configurations.
+      - Parameters:
+        - `elementSelector` (mandatory, only one of the following must be provided)
+            - `boundingBox` (object): Defines the coordinates and size of the region.
+              - `x` (number): X-coordinate of the region.
+              - `y` (number): Y-coordinate of the region.
+              - `width` (number): Width of the region.
+              - `height` (number): Height of the region.
+            - `elementXpath` (string): The XPath selector for the element.
+            - `elementCSS` (string): The CSS selector for the element.
+
+        - `padding` (optional)
+            - Specifies additional padding around the selected region.
+            - Properties:
+              - `top` (string): Padding from the top.
+              - `left` (string): Padding from the left.
+              - `right` (string): Padding from the right.
+              - `bottom` (string): Padding from the bottom.
+
+        - `algorithm` (mandatory)
+            - Specifies the snapshot comparison algorithm.
+            - Allowed values: `standard`, `layout`, `ignore`, `intelliignore`.
+
+        - `configuration` (required for `standard` and `intelliignore` algorithms, ignored otherwise)
+            - `diffSensitivity` (number): Sensitivity level for detecting differences.
+            - `imageIgnoreThreshold` (number): Threshold for ignoring minor image differences.
+            - `carouselsEnabled` (boolean): Whether to enable carousel detection.
+            - `bannersEnabled` (boolean): Whether to enable banner detection.
+            - `adsEnabled` (boolean): Whether to enable ad detection.
+
+         - `assertion` (optional)
+            - Defines assertions to apply to the region.
+            - `diffIgnoreThreshold` (number): The threshold for ignoring minor differences.
+
+### Example Usage for regions
+
+```
+const obj1 = {
+  elementSelector: {
+    elementCSS: ".ad-banner" 
+  },
+  padding: {
+    top: "10px",
+    left: "20px",
+    right: "15px",
+    bottom: "10px"
+  },
+  algorithm: "intelliignore", 
+  configuration: {
+    diffSensitivity: 2,
+    imageIgnoreThreshold: 0.2,
+    carouselsEnabled: true,
+    bannersEnabled: true,
+    adsEnabled: true
+  },
+  assertion: {
+    diffIgnoreThreshold: 0.4,
+  }
+};
+
+percySnapshot(page, name="Homepage", regions: [obj1]);
+```
 
 ### Creating Percy on automate build
 Note: Automate Percy Token starts with `auto` keyword. The command can be triggered using `exec` keyword.
