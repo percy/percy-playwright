@@ -179,5 +179,36 @@ test.describe('createRegion', () => {
     const region = createRegion();
     expect(region.assertion).toBeUndefined();
   });
+
+  test('includes carouselsEnabled in configuration if provided', () => {
+    const region = createRegion({ carouselsEnabled: true });
+    expect(region.configuration.carouselsEnabled).toBe(true);
+  });
+
+  test('includes bannersEnabled in configuration if provided', () => {
+    const region = createRegion({ bannersEnabled: true });
+    expect(region.configuration.bannersEnabled).toBe(true);
+  });
+
+  test('includes adsEnabled in configuration if provided', () => {
+    const region = createRegion({ adsEnabled: true });
+    expect(region.configuration.adsEnabled).toBe(true);
+  });
+
+  test('does not include carouselsEnabled in configuration if null', () => {
+    const region = createRegion({ carouselsEnabled: null });
+    expect(region.configuration.carouselsEnabled).toBeUndefined();
+  });
+
+  test('does not include bannersEnabled in configuration if null', () => {
+    const region = createRegion({ bannersEnabled: null });
+    expect(region.configuration.bannersEnabled).toBeUndefined();
+  });
+
+  test('does not include adsEnabled in configuration if null', () => {
+    const region = createRegion({ adsEnabled: null });
+    expect(region.configuration.adsEnabled).toBeUndefined();
+  });
 });
+
 
