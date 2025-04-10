@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import percySnapshot from '../index.js';
 import sinon from 'sinon';
 import { Utils } from '../utils.js';
-const { percyScreenshot, ENV_INFO, CLIENT_INFO } = percySnapshot;
+const { percyScreenshot, ENV_INFO, CLIENT_INFO, createRegion } = percySnapshot;
 
 test.describe('percySnapshot', () => {
   test.beforeEach(async ({ page }) => {
@@ -125,3 +125,75 @@ test.describe('percyScreenshot', () => {
     ]));
   });
 });
+
+test.describe('createRegion', () => {
+  test('creates a region with default values', () => {
+    const region = createRegion();
+    expect(region).toEqual({
+      algorithm: 'ignore',
+      elementSelector: {}
+    });
+  });
+
+  test('sets boundingBox in elementSelector', () => {
+    const region = createRegion({ boundingBox: { x: 10, y: 20, width: 100, height: 50 } });
+    expect(region.elementSelector.boundingBox).toEqual({ x: 10, y: 20, width: 100, height: 50 });
+  });
+
+  test('sets elementXpath in elementSelector', () => {
+    const region = createRegion({ elementXpath: '//div[@id=\'test\']' });
+    expect(region.elementSelector.elementXpath).toBe("//div[@id='test']");
+  });
+
+  test('sets elementCSS in elementSelector', () => {
+    const region = createRegion({ elementCSS: '.test-class' });
+    expect(region.elementSelector.elementCSS).toBe('.test-class');
+  });
+
+  test('includes padding if provided', () => {
+    const region = createRegion({ padding: 10 });
+    expect(region.padding).toBe(10);
+  });
+
+  test('includes configuration when algorithm is standard', () => {
+    const region = createRegion({ algorithm: 'standard', diffSensitivity: 5 });
+    expect(region.configuration.diffSensitivity).toBe(5);
+  });
+
+  test('includes configuration when algorithm is intelliignore', () => {
+    const region = createRegion({ algorithm: 'intelliignore', imageIgnoreThreshold: 0.2 });
+    expect(region.configuration.imageIgnoreThreshold).toBe(0.2);
+  });
+
+  test('does not include configuration for ignore algorithm', () => {
+    const region = createRegion({ algorithm: 'ignore', diffSensitivity: 5 });
+    expect(region.configuration).toBeUndefined();
+  });
+
+  test('includes assertion when diffIgnoreThreshold is provided', () => {
+    const region = createRegion({ diffIgnoreThreshold: 0.1 });
+    expect(region.assertion.diffIgnoreThreshold).toBe(0.1);
+  });
+
+  test('does not include assertion when diffIgnoreThreshold is not provided', () => {
+    const region = createRegion();
+    expect(region.assertion).toBeUndefined();
+  });
+
+  test('includes carouselsEnabled in configuration if provided', () => {
+    const region = createRegion({ algorithm: 'standard', carouselsEnabled: true });
+    expect(region.configuration.carouselsEnabled).toBe(true);
+  });
+
+  test('includes bannersEnabled in configuration if provided', () => {
+    const region = createRegion({ algorithm: 'standard', bannersEnabled: true });
+    expect(region.configuration.bannersEnabled).toBe(true);
+  });
+
+  test('includes adsEnabled in configuration if provided', () => {
+    const region = createRegion({ algorithm: 'standard', adsEnabled: true });
+    expect(region.configuration.adsEnabled).toBe(true);
+  });
+});
+
+
