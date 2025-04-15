@@ -177,6 +177,17 @@ const obj1 = {
   }
 };
 
+// we can use the createRegion function
+
+const {createRegion } = percySnapshot;
+
+const obj2 = createRegion({
+  algorithm: "intelliignore",
+  diffSensitivity: 3,
+  adsEnabled: true,
+  diffIgnoreThreshold: 0.4
+});
+
 percySnapshot(page, name="Homepage", regions: [obj1]);
 ```
 
