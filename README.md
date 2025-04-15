@@ -188,7 +188,7 @@ const obj2 = createRegion({
   diffIgnoreThreshold: 0.4
 });
 
-percySnapshot(page, name="Homepage 1", { regions: [obj1] });
+percySnapshot(page, "Homepage 1", { regions: [obj1] });
 ```
 
 ### Creating Percy on automate build
