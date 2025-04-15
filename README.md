@@ -179,7 +179,7 @@ const obj1 = {
 
 // we can use the createRegion function
 
-const {createRegion } = percySnapshot;
+const { createRegion } = percySnapshot;
 
 const obj2 = createRegion({
   algorithm: "intelliignore",
@@ -188,7 +188,7 @@ const obj2 = createRegion({
   diffIgnoreThreshold: 0.4
 });
 
-percySnapshot(page, name="Homepage", regions: [obj1]);
+percySnapshot(page, name="Homepage 1", { regions: [obj1] });
 ```
 
 ### Creating Percy on automate build
