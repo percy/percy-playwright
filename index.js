@@ -25,6 +25,8 @@ const percySnapshot = async function(page, name, options) {
       return PercyDOM.serialize(options);
     }, options);
 
+    domSnapshot.cookies = await page.context().cookies();
+
     // Post the DOM to the snapshot endpoint with snapshot options and other info
     const response = await utils.postSnapshot({
       ...options,
