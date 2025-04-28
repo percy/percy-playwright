@@ -45,6 +45,18 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
+  test('adds cookies to domSnapshot', async ({ page }) => {
+    const mockCookies = [{ name: 'test_cookie', value: 'test_value', domain: 'example.com' }];
+    sinon.stub(page.context(), 'cookies').resolves(mockCookies);
+  
+    const domSnapshot = { html: '<html></html>' };
+    sinon.stub(page, 'evaluate').resolves(domSnapshot);
+  
+    await percySnapshot(page, 'Snapshot with Cookies');
+  
+    expect(domSnapshot.cookies).toEqual(mockCookies);
+  });
+
   test('handles snapshot failures', async ({ page }) => {
     await helpers.test('error', '/percy/snapshot');
 
