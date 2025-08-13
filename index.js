@@ -61,6 +61,7 @@ const handleDynamicResources = async () => {
             reader.readAsDataURL(blob);
           }))
           .catch(err => {
+            log.warn(`Failed to process blob URL "${blobUrl}": ${err.message}`);
             // Silently handle errors
           });
         promises.push(promise);
