@@ -14,7 +14,23 @@ const handleDynamicResources = async () => {
   document.querySelectorAll('img').forEach(img => {
     const dataSrc = img.getAttribute('data-src');
     if (dataSrc) {
-      img.src = dataSrc;
+      try {
+        // Only allow http, https, data, or blob URLs
+        const url = new URL(dataSrc, window.location.origin);
+        if (
+          url.protocol === 'http:' ||
+          url.protocol === 'https:' ||
+          url.protocol === 'data:' ||
+          url.protocol === 'blob:'
+        ) {
+          img.src = url.href;
+        } else {
+          console.warn(`[percy] Ignored unsafe data-src value: ${dataSrc}`);
+        }
+      } catch (e) {
+        // If dataSrc is not a valid URL, ignore it
+        console.warn(`[percy] Invalid data-src value: ${dataSrc}`);
+      }
     }
   });
 
@@ -31,9 +47,11 @@ const handleDynamicResources = async () => {
       if (blobUrlMatch && blobUrlMatch[1]) {
         const blobUrl = blobUrlMatch[1];
 
+        /* eslint-disable-next-line no-undef */
         const promise = fetch(blobUrl)
           .then(res => res.blob())
           .then(blob => new Promise((resolve, reject) => {
+            /* eslint-disable-next-line no-undef */
             const reader = new FileReader();
             reader.onloadend = () => {
               el.style.backgroundImage = style.getPropertyValue('background-image').replace(blobUrl, reader.result);
