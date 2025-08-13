@@ -8,6 +8,89 @@ const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 const log = utils.logger('playwright');
 
+// This function is executed in the browser context to handle dynamic resources.
+const handleDynamicResources = async () => {
+  // Handle lazy-loaded images
+  document.querySelectorAll('img').forEach(img => {
+    const dataSrc = img.getAttribute('data-src');
+    if (dataSrc) {
+      img.src = dataSrc;
+    }
+  });
+
+  // Handle blob background images
+  const elements = Array.from(document.querySelectorAll('*'));
+  const promises = [];
+
+  for (const el of elements) {
+    const style = window.getComputedStyle(el);
+    const backgroundImage = style.getPropertyValue('background-image');
+
+    if (backgroundImage && backgroundImage.includes('blob:')) {
+      const blobUrlMatch = backgroundImage.match(/url\("?(blob:.+?)"?\)/);
+      if (blobUrlMatch && blobUrlMatch[1]) {
+        const blobUrl = blobUrlMatch[1];
+
+        const promise = fetch(blobUrl)
+          .then(res => res.blob())
+          .then(blob => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              el.style.backgroundImage = style.getPropertyValue('background-image').replace(blobUrl, reader.result);
+              resolve();
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          }))
+          .catch(err => {
+            // Log error in the browser console
+            console.error(`[percy] Could not convert blob URL ${blobUrl} to data URL:`, err);
+          });
+        promises.push(promise);
+      }
+    }
+  }
+  await Promise.all(promises);
+};
+
+// Processes a single cross-origin frame to capture its snapshot and resources.
+async function processFrame(page, frame, options, percyDOM) {
+  const frameUrl = frame.url();
+
+  // Execute pre-serialization transformations in the iframe
+  await frame.evaluate(handleDynamicResources);
+
+  const iframeSnapshot = await frame.evaluate((opts) => {
+    /* eslint-disable-next-line no-undef */
+    return PercyDOM.serialize(opts);
+  }, { ...options, enableJavascript: true });
+
+  // Create a new resource for the iframe's HTML
+  const iframeResource = {
+    url: frameUrl,
+    content: iframeSnapshot.html,
+    mimetype: 'text/html'
+  };
+
+  // Get the iframe's element data from the main page context
+  const iframeData = await page.evaluate((fUrl) => {
+    const iframes = Array.from(document.querySelectorAll('iframe'));
+    const matchingIframe = iframes.find(iframe => iframe.src.startsWith(fUrl));
+    if (matchingIframe) {
+      return {
+        percyElementId: matchingIframe.getAttribute('data-percy-element-id')
+      };
+    }
+  }, frameUrl);
+
+  return {
+    iframeData,
+    iframeResource,
+    iframeSnapshot,
+    frameUrl
+  };
+}
+
 // Take a DOM snapshot and post it to the snapshot endpoint
 const percySnapshot = async function(page, name, options) {
   if (!page) throw new Error('A Playwright `page` object is required.');
@@ -16,7 +99,11 @@ const percySnapshot = async function(page, name, options) {
 
   try {
     // Inject the DOM serialization script
-    await page.evaluate(await utils.fetchPercyDOM());
+    const percyDOM = await utils.fetchPercyDOM();
+    await page.evaluate(percyDOM);
+
+    // Execute pre-serialization transformations on the main page
+    await page.evaluate(handleDynamicResources);
 
     // Serialize and capture the DOM
     /* istanbul ignore next: no instrumenting injected code */
@@ -24,6 +111,37 @@ const percySnapshot = async function(page, name, options) {
       /* eslint-disable-next-line no-undef */
       return PercyDOM.serialize(options);
     }, options);
+
+    // Process CORS IFrames
+    const pageUrl = new URL(page.url());
+    const crossOriginFrames = page.frames()
+      .filter(frame => frame.url() !== 'about:blank' && new URL(frame.url()).origin !== pageUrl.origin);
+
+    // Inject Percy DOM into all cross-origin frames before processing them in parallel
+    await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
+
+    const processedFrames = await Promise.all(
+      crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM))
+    );
+
+    for (const { iframeData, iframeResource, iframeSnapshot, frameUrl } of processedFrames) {
+      // Add the iframe's own resources to the main snapshot
+      domSnapshot.resources.push(...iframeSnapshot.resources);
+      // Add the iframe HTML resource itself
+      domSnapshot.resources.push(iframeResource);
+
+      if (iframeData && iframeData.percyElementId) {
+        const regex = new RegExp(`(<iframe[^>]*data-percy-element-id=["']${iframeData.percyElementId}["'][^>]*>)`);
+        const match = domSnapshot.html.match(regex);
+
+        if (match) {
+          const iframeTag = match[1];
+          // Replace the original iframe tag with one that points to the new resource.
+          const newIframeTag = iframeTag.replace(/src="[^"]*"/i, `src="${frameUrl}"`);
+          domSnapshot.html = domSnapshot.html.replace(iframeTag, newIframeTag);
+        }
+      }
+    }
 
     domSnapshot.cookies = await page.context().cookies();
 
