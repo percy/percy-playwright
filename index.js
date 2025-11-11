@@ -8,76 +8,9 @@ const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 const log = utils.logger('playwright');
 
-// This function is executed in the browser context to handle dynamic resources.
-/* istanbul ignore next: browser-executed function difficult to instrument */
-const handleDynamicResources = async () => {
-  // Handle lazy-loaded images
-  document.querySelectorAll('img').forEach(img => {
-    const dataSrc = img.getAttribute('data-src');
-    if (dataSrc) {
-      try {
-        // Only allow http, https, data, or blob URLs
-        const url = new URL(dataSrc, window.location.origin);
-        if (
-          url.protocol === 'http:' ||
-          url.protocol === 'https:' ||
-          url.protocol === 'data:' ||
-          url.protocol === 'blob:'
-        ) {
-          img.src = url.href;
-        } else {
-          // Ignored unsafe data-src value
-        }
-      } catch (e) {
-        // If dataSrc is not a valid URL, ignore it
-      }
-    }
-  });
-
-  // Handle blob background images
-  const elements = Array.from(document.querySelectorAll('*'));
-  const promises = [];
-
-  for (const el of elements) {
-    const style = window.getComputedStyle(el);
-    const backgroundImage = style.getPropertyValue('background-image');
-
-    if (backgroundImage && backgroundImage.includes('blob:')) {
-      const blobUrlMatch = backgroundImage.match(/url\("?(blob:.+?)"?\)/);
-      if (blobUrlMatch && blobUrlMatch[1]) {
-        const blobUrl = blobUrlMatch[1];
-
-        /* eslint-disable-next-line no-undef */
-        const promise = fetch(blobUrl)
-          .then(res => res.blob())
-          .then(blob => new Promise((resolve, reject) => {
-            /* eslint-disable-next-line no-undef */
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              el.style.backgroundImage = style.getPropertyValue('background-image').replace(blobUrl, reader.result);
-              resolve();
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          }))
-          .catch(err => {
-            log.warn(`Failed to process blob URL "${blobUrl}": ${err.message}`);
-            // Silently handle errors
-          });
-        promises.push(promise);
-      }
-    }
-  }
-  await Promise.all(promises);
-};
-
 // Processes a single cross-origin frame to capture its snapshot and resources.
 async function processFrame(page, frame, options, percyDOM) {
   const frameUrl = frame.url();
-
-  // Execute pre-serialization transformations in the iframe
-  /* istanbul ignore next: browser-executed function call */
-  await frame.evaluate(handleDynamicResources);
 
   /* istanbul ignore next: browser-executed iframe serialization */
   const iframeSnapshot = await frame.evaluate((opts) => {
@@ -122,14 +55,6 @@ const percySnapshot = async function(page, name, options) {
     // Inject the DOM serialization script
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
-
-    // Execute pre-serialization transformations on the main page
-    try {
-      /* istanbul ignore next: browser-executed function call */
-      await page.evaluate(handleDynamicResources);
-    } catch (error) {
-      // Silently handle any errors from handleDynamicResources to not disrupt snapshots
-    }
 
     // Serialize and capture the DOM
     /* istanbul ignore next: no instrumenting injected code */

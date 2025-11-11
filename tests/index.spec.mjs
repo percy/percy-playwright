@@ -72,31 +72,6 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
-  // temp specs for alpha release, some of them to be removed later
-
-  test('processes pages with lazy-loaded images via data-src', async ({ page }) => {
-    // Create a test page with data-src images
-    await page.setContent(`
-      <html>
-        <body>
-          <img data-src="https://example.com/image1.jpg" alt="Test image 1">
-          <img data-src="http://example.com/image2.jpg" alt="Test image 2">
-          <img data-src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" alt="Test image 3">
-          <img data-src="blob:http://example.com/blob-id" alt="Test image 4">
-          <img data-src="javascript:alert('xss')" alt="Test image 5">
-          <img data-src="invalid-url" alt="Test image 6">
-        </body>
-      </html>
-    `);
-
-    await percySnapshot(page, 'Snapshot with data-src images');
-
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot with data-src images'
-    ]));
-  });
-
   test('processes cross-origin iframe with percy-element-id matching', async ({ page }) => {
     // Mock page.evaluate to return a specific DOM snapshot with iframe
     const mockDomSnapshot = {
@@ -111,12 +86,10 @@ test.describe('percySnapshot', () => {
     };
 
     // First call (percyDOM injection) returns undefined
-    // Second call (handleDynamicResources) returns undefined  
-    // Third call (iframe DOM serialization) returns snapshot
+    // Second call (iframe DOM serialization) returns snapshot
     mockFrame.evaluate
       .onFirstCall().resolves(undefined)
-      .onSecondCall().resolves(undefined)
-      .onThirdCall().resolves({ html: '<html><body>Cross-origin content</body></html>', resources: [] });
+      .onSecondCall().resolves({ html: '<html><body>Cross-origin content</body></html>', resources: [] });
 
     sinon.stub(page, 'frames').returns([
       { url: () => page.url() }, // Same origin frame (main page) 
@@ -135,7 +108,7 @@ test.describe('percySnapshot', () => {
         // DOM serialization
         return Promise.resolve(mockDomSnapshot);
       }
-      // handleDynamicResources or other functions
+      // other functions
       return Promise.resolve();
     });
 
@@ -181,7 +154,7 @@ test.describe('percySnapshot', () => {
         // iframe data retrieval - return null to simulate no match
         return Promise.resolve(null);
       }
-      // handleDynamicResources or other functions
+      // other functions
       return Promise.resolve();
     });
 
@@ -190,60 +163,6 @@ test.describe('percySnapshot', () => {
     const logs = await helpers.get('logs');
     expect(logs).toEqual(expect.arrayContaining([
       'Snapshot found: Snapshot with iframe no percy-element-id match'
-    ]));
-  });
-
-  test('handles handleDynamicResources errors gracefully', async ({ page }) => {
-    // Create a page that will cause handleDynamicResources to fail
-    await page.setContent(`
-      <html>
-        <body>
-          <h1>Test Page</h1>
-        </body>
-      </html>
-    `);
-
-    // Mock page.evaluate to throw an error for handleDynamicResources
-    const originalEvaluate = page.evaluate;
-    let callCount = 0;
-    sinon.stub(page, 'evaluate').callsFake((func, ...args) => {
-      callCount++;
-      // First call is for percyDOM injection (should succeed)
-      if (callCount === 1) {
-        return originalEvaluate.call(page, func, ...args);
-      }
-      // Second call is for handleDynamicResources (should fail)
-      if (callCount === 2) {
-        return Promise.reject(new Error('handleDynamicResources failed'));
-      }
-      // Third call is for DOM serialization (should succeed)
-      return originalEvaluate.call(page, func, ...args);
-    });
-
-    await percySnapshot(page, 'Snapshot with handleDynamicResources error');
-
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot with handleDynamicResources error'
-    ]));
-  });
-
-  test('executes handleDynamicResources function in browser context', async ({ page }) => {
-    // Create a simpler test page 
-    await page.setContent(`
-      <html>
-        <body>
-          <img data-src="https://example.com/image.jpg" alt="Test">
-          <img data-src="javascript:alert('xss')" alt="Unsafe">
-        </body>
-      </html>
-    `);
-
-    await percySnapshot(page, 'Comprehensive handleDynamicResources test');
-
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Comprehensive handleDynamicResources test'
     ]));
   });
 
@@ -296,7 +215,7 @@ test.describe('percySnapshot', () => {
         });
       }
       
-      // handleDynamicResources or other functions
+      // other functions
       return Promise.resolve();
     });
 
@@ -307,84 +226,19 @@ test.describe('percySnapshot', () => {
       'Snapshot found: Snapshot with iframe src replacement'
     ]));
   });
+});
 
-  test('covers handleDynamicResources function execution paths', async ({ page }) => {
-    // Create a page that will exercise handleDynamicResources code paths
-    await page.setContent(`
-      <html>
-        <head>
-          <style>
-            .test-div { background-image: url('blob:http://test.com/blob123'); width: 100px; height: 100px; }
-          </style>
-        </head>
-        <body>
-          <img data-src="https://test.com/valid.jpg" alt="Valid HTTPS">
-          <img data-src="http://test.com/valid.jpg" alt="Valid HTTP">
-          <img data-src="data:image/png;base64,test" alt="Valid Data URL">
-          <img data-src="blob:http://test.com/blob" alt="Valid Blob URL">
-          <img data-src="ftp://test.com/invalid" alt="Invalid Protocol">
-          <img data-src="not-a-url" alt="Invalid URL">
-          <div class="test-div">Element with blob background</div>
-          <div style="background-image: url('blob:http://test.com/blob456');">Another blob div</div>
-        </body>
-      </html>
-    `);
+test.describe('percyScreenshot', () => {
+  test.beforeEach(async ({ page }) => {
+    await helpers.test('error', '/percy/snapshot');
 
-    // Execute the handleDynamicResources function directly in the browser
-    await page.evaluate(() => {
-      // Simulate the handleDynamicResources function execution
-      // This mirrors the actual function but allows us to test it directly
-      const images = document.querySelectorAll('img');
-      images.forEach(img => {
-        const dataSrc = img.getAttribute('data-src');
-        if (dataSrc) {
-          try {
-            const url = new URL(dataSrc, window.location.origin);
-            if (
-              url.protocol === 'http:' ||
-              url.protocol === 'https:' ||
-              url.protocol === 'data:' ||
-              url.protocol === 'blob:'
-            ) {
-              img.src = url.href;
-            }
-          } catch (e) {
-            // Invalid URL handling
-          }
-        }
-      });
+    await percySnapshot(page, 'Snapshot 1');
 
-      // Process blob background images
-      const elements = Array.from(document.querySelectorAll('*'));
-      const promises = [];
-
-      for (const el of elements) {
-        const style = window.getComputedStyle(el);
-        const backgroundImage = style.getPropertyValue('background-image');
-
-        if (backgroundImage && backgroundImage.includes('blob:')) {
-          const blobUrlMatch = backgroundImage.match(/url\("?(blob:.+?)"?\)/);
-          if (blobUrlMatch && blobUrlMatch[1]) {
-            // Simulate blob processing (simplified)
-            const blobUrl = blobUrlMatch[1];
-            promises.push(Promise.resolve());
-          }
-        }
-      }
-      
-      return Promise.all(promises);
-    });
-
-    await percySnapshot(page, 'Direct handleDynamicResources execution');
-
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Direct handleDynamicResources execution'
+    expect(helpers.logger.stderr).toEqual(expect.arrayContaining([
+      '[percy] Could not take DOM snapshot "Snapshot 1"'
     ]));
   });
 });
-
-// temp specs for alpha release, some of them to be removed later
 
 test.describe('percyScreenshot', () => {
   test.beforeEach(async ({ page }) => {
