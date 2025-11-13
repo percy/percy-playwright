@@ -64,6 +64,9 @@ const percySnapshot = async function(page, name, options) {
     }, options);
 
     // Process CORS IFrames
+    // Note: Blob URL handling (data-src images, blob background images) is now handled
+    // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
+    // This section only handles cross-origin iframe serialization and resource merging.
     const pageUrl = new URL(page.url());
     const crossOriginFrames = page.frames()
       .filter(frame => frame.url() !== 'about:blank' && new URL(frame.url()).origin !== pageUrl.origin);
