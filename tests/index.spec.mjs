@@ -30,12 +30,17 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
-  test('posts snapshots to the local percy server', async ({ page }) => {
+    test('posts snapshots to the local percy server', async ({ page }) => {
     await percySnapshot(page, 'Snapshot 1');
     await percySnapshot(page, 'Snapshot 2');
     await percySnapshot(page, 'Snapshot 3', { sync: true });
+    
+    // Add delay to ensure logs are captured
+    // temp for alpha release
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-    expect(await helpers.get('logs')).toEqual(expect.arrayContaining([
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
       'Snapshot found: Snapshot 1',
       'Snapshot found: Snapshot 2',
       `- url: ${helpers.testSnapshotURL}`,
@@ -58,6 +63,173 @@ test.describe('percySnapshot', () => {
   });
 
   test('handles snapshot failures', async ({ page }) => {
+    await helpers.test('error', '/percy/snapshot');
+
+    await percySnapshot(page, 'Snapshot 1');
+
+    expect(helpers.logger.stderr).toEqual(expect.arrayContaining([
+      '[percy] Could not take DOM snapshot "Snapshot 1"'
+    ]));
+  });
+
+  test('processes cross-origin iframe with percy-element-id matching', async ({ page }) => {
+    // Mock page.evaluate to return a specific DOM snapshot with iframe
+    const mockDomSnapshot = {
+      html: `<html><body><h1>Main Page</h1><iframe src="about:blank" data-percy-element-id="iframe-1"></iframe></body></html>`,
+      resources: []
+    };
+
+    // Mock the cross-origin frame
+    const mockFrame = {
+      url: () => 'https://cross-origin.com/frame',
+      evaluate: sinon.stub()
+    };
+
+    // First call (percyDOM injection) returns undefined
+    // Second call (iframe DOM serialization) returns snapshot
+    mockFrame.evaluate
+      .onFirstCall().resolves(undefined)
+      .onSecondCall().resolves({ html: '<html><body>Cross-origin content</body></html>', resources: [] });
+
+    sinon.stub(page, 'frames').returns([
+      { url: () => page.url() }, // Same origin frame (main page) 
+      mockFrame // Cross-origin frame
+    ]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+
+    // Mock page.evaluate to return the DOM snapshot with iframe
+    const originalPageEvaluate = page.evaluate;
+    sinon.stub(page, 'evaluate').callsFake((func, ...args) => {
+      if (typeof func === 'string') {
+        // percyDOM injection
+        return Promise.resolve();
+      }
+      if (func.toString().includes('PercyDOM.serialize')) {
+        // DOM serialization
+        return Promise.resolve(mockDomSnapshot);
+      }
+      // other functions
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with iframe percy-element-id');
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot with iframe percy-element-id'
+    ]));
+  });
+
+  test('handles iframe processing without percy-element-id match', async ({ page }) => {
+    // Mock page.evaluate to return a DOM snapshot without matching percy-element-id
+    const mockDomSnapshot = {
+      html: `<html><body><h1>Main Page</h1><iframe src="about:blank" data-percy-element-id="different-id"></iframe></body></html>`,
+      resources: []
+    };
+
+    // Mock the cross-origin frame
+    const mockFrame = {
+      url: () => 'https://cross-origin.com/frame',
+      evaluate: sinon.stub().resolves({ html: '<html><body>Cross-origin content</body></html>', resources: [] })
+    };
+
+    sinon.stub(page, 'frames').returns([
+      { url: () => page.url() }, // Same origin frame (main page) 
+      mockFrame // Cross-origin frame
+    ]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+
+    // Mock page.evaluate for iframe data retrieval to return null (no matching iframe)
+    const originalPageEvaluate = page.evaluate;
+    sinon.stub(page, 'evaluate').callsFake((func, ...args) => {
+      if (typeof func === 'string') {
+        // percyDOM injection
+        return Promise.resolve();
+      }
+      if (func.toString().includes('PercyDOM.serialize')) {
+        // DOM serialization
+        return Promise.resolve(mockDomSnapshot);
+      }
+      if (func.toString().includes('iframes.find')) {
+        // iframe data retrieval - return null to simulate no match
+        return Promise.resolve(null);
+      }
+      // other functions
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with iframe no percy-element-id match');
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot with iframe no percy-element-id match'
+    ]));
+  });
+
+  test('handles iframe src attribute replacement', async ({ page }) => {
+    // Create a test specifically for iframe src replacement logic
+    await page.setContent(`
+      <html>
+        <body>
+          <h1>Main Page</h1>
+          <iframe src="https://cross-origin.com/frame" data-percy-element-id="test-iframe-1"></iframe>
+        </body>
+      </html>
+    `);
+
+    // Mock cross-origin frame
+    const mockFrame = {
+      url: () => 'https://cross-origin.com/frame',
+      evaluate: sinon.stub().resolves({ html: '<html><body>Frame content</body></html>', resources: [] })
+    };
+
+    sinon.stub(page, 'frames').returns([
+      { url: () => page.url() }, // Same origin frame
+      mockFrame // Cross-origin frame
+    ]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+
+    // Mock page.evaluate to control DOM snapshot and iframe data retrieval
+    let evaluateCallCount = 0;
+    const originalPageEvaluate = page.evaluate;
+    sinon.stub(page, 'evaluate').callsFake((func, ...args) => {
+      evaluateCallCount++;
+      
+      if (typeof func === 'string') {
+        // percyDOM injection
+        return Promise.resolve();
+      }
+      
+      if (func.toString().includes('PercyDOM.serialize')) {
+        // DOM serialization - return HTML with iframe that has percy-element-id
+        return Promise.resolve({
+          html: `<html><body><h1>Main Page</h1><iframe src="https://cross-origin.com/frame" data-percy-element-id="test-iframe-1"></iframe></body></html>`,
+          resources: []
+        });
+      }
+      
+      if (func.toString().includes('iframes.find')) {
+        // iframe data retrieval - return matching iframe data
+        return Promise.resolve({
+          percyElementId: 'test-iframe-1'
+        });
+      }
+      
+      // other functions
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with iframe src replacement');
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot with iframe src replacement'
+    ]));
+  });
+});
+
+test.describe('percyScreenshot', () => {
+  test.beforeEach(async ({ page }) => {
     await helpers.test('error', '/percy/snapshot');
 
     await percySnapshot(page, 'Snapshot 1');
