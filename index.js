@@ -13,6 +13,8 @@ async function processFrame(page, frame, options, percyDOM) {
   const frameUrl = frame.url();
 
   /* istanbul ignore next: browser-executed iframe serialization */
+  // enableJavaScript: true prevents the standard iframe serialization logic from running.
+  // This is necessary because we're manually handling cross-origin iframe serialization here.
   const iframeSnapshot = await frame.evaluate((opts) => {
     /* eslint-disable-next-line no-undef */
     return PercyDOM.serialize(opts);
