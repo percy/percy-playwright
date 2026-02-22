@@ -25,6 +25,10 @@ const getWidthsForMultiDOM = (userPassedWidths, eligibleWidths) => {
 };
 
 function ignoreCanvasSerializationErrors(options) {
+  /* istanbul ignore next: In newer CLI versions, utils.percy.config.snapshot.ignoreCanvasSerializationErrors
+  always returns false (not undefined) even when not set in config, so this fallback branch is never
+  executed. We keep it for backward compatibility with older CLI versions where it could be undefined.
+  Cannot be tested without mocking older CLI behavior, hence excluded from coverage. */
   return options?.ignoreCanvasSerializationErrors ??
          utils.percy?.config?.snapshot?.ignoreCanvasSerializationErrors ??
          false;
