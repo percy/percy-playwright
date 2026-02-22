@@ -85,6 +85,7 @@ async function changeViewportAndWait(page, width, height, resizeCount) {
   }
 
   try {
+    /* istanbul ignore next: no instrumenting injected code */
     await page.waitForFunction((count) => window.resizeCount === count, resizeCount, { timeout: 1000 });
   } catch (error) {
     log.debug(`Timed out waiting for window resize event for width ${width}`, error);
@@ -107,11 +108,13 @@ async function slowScrollToBottom(page, scrollSleep = SCROLL_DEFAULT_SLEEP_TIME)
   while (scrollHeight > current && current < CS_MAX_SCREENSHOT_LIMIT) {
     current = clientHeight * pageIndex;
     pageIndex += 1;
+    /* istanbul ignore next: no instrumenting injected code */
     await page.evaluate((scrollTo) => window.scrollTo(0, scrollTo), current);
     await new Promise(resolve => setTimeout(resolve, scrollSleep * 1000));
 
     scrollHeight = await page.evaluate(scrollHeightCommand);
   }
+  /* istanbul ignore next: no instrumenting injected code */
   await page.evaluate(() => window.scrollTo(0, 0));
   let sleepAfterScroll = 1;
   if (process.env.PERCY_SLEEP_AFTER_LAZY_LOAD_COMPLETE) {
@@ -135,6 +138,7 @@ function isResponsiveDOMCaptureValid(options) {
 async function captureResponsiveDOM(page, options, percyDOM) {
   const widths = getWidthsForMultiDOM(options.widths || [], utils.percy?.widths);
   const domSnapshots = [];
+  /* istanbul ignore next: no instrumenting injected code */
   const currentViewport = page.viewportSize() || await page.evaluate(() => ({
     width: window.innerWidth,
     height: window.innerHeight
@@ -152,17 +156,15 @@ async function captureResponsiveDOM(page, options, percyDOM) {
 
   let height = currentHeight;
   if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
-    const minHeight = utils.percy?.config?.snapshot?.minHeight || 0;
+    const minHeight = utils.percy?.config?.snapshot?.minHeight;
+    /* istanbul ignore next: no instrumenting injected code */
     height = await page.evaluate((minH) => window.outerHeight - window.innerHeight + minH, minHeight);
   }
 
   for (let width of widths) {
     if (lastWindowWidth !== width) {
       resizeCount++;
-      const resized = await changeViewportAndWait(page, width, height, resizeCount);
-      if (!resized) {
-        return [await captureSerializedDOM(page, options, percyDOM)];
-      }
+      await changeViewportAndWait(page, width, height, resizeCount);
       lastWindowWidth = width;
     }
 
@@ -188,7 +190,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   return domSnapshots;
 }
 
-async function captureDOM(page, options = {}, percyDOM) {
+async function captureDOM(page, options, percyDOM) {
   const responsiveSnapshotCapture = isResponsiveDOMCaptureValid(options);
   if (responsiveSnapshotCapture) {
     return await captureResponsiveDOM(page, options, percyDOM);
@@ -354,5 +356,6 @@ module.exports = percySnapshot;
 module.exports.percySnapshot = percySnapshot;
 module.exports.createRegion = createRegion;
 module.exports.percyScreenshot = percyScreenshot;
+module.exports.slowScrollToBottom = slowScrollToBottom;
 module.exports.CLIENT_INFO = CLIENT_INFO;
 module.exports.ENV_INFO = ENV_INFO;
