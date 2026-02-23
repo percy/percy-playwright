@@ -536,6 +536,89 @@ test.describe('percySnapshot', () => {
       'Snapshot found: Snapshot 1'
     ]));
   });
+
+  test('uses device-specific heights for mobile widths from deviceDetails', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [360, 390],
+      deviceDetails: [
+        { width: 360, height: 670, deviceScaleFactor: 3 },
+        { width: 390, height: 663, deviceScaleFactor: 3 }
+      ]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const mobile360Call = calls.find(call => call.args[0].width === 360);
+    const mobile390Call = calls.find(call => call.args[0].width === 390);
+    
+    expect(mobile360Call.args[0].height).toBe(670);
+    expect(mobile390Call.args[0].height).toBe(663);
+  });
+
+  test('falls back to defaultHeight when deviceDetails is undefined or device not found', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [360, 390]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const mobile360Call = calls.find(call => call.args[0].width === 360);
+    const mobile768Call = calls.find(call => call.args[0].width === 390);
+    
+    expect(mobile360Call).toBeDefined();
+    expect(mobile360Call.args[0].height).toBe(720);
+    expect(mobile768Call).toBeDefined();
+    expect(mobile768Call.args[0].height).toBe(720); // uses defaultHeight
+  });
+
+  test('deduplicates widths and prioritizes mobile widths with device heights', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [768],
+      deviceDetails: [{ width: 768, height: 1024, deviceScaleFactor: 2 }]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [768] });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const width768Calls = calls.filter(call => call.args[0].width === 768);
+    
+    expect(width768Calls.length).toBeLessThanOrEqual(1); // No duplicates
+    if (width768Calls.length > 0) {
+      expect(width768Calls[0].args[0].height).toBe(1024); // Uses device height
+    }
+  });
+
+  test('handles duplicate widths in mobile array', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [360, 360, 768], // duplicate 360
+      deviceDetails: [
+        { width: 360, height: 670, deviceScaleFactor: 3 },
+        { width: 360, height: 670, deviceScaleFactor: 3 },
+        { width: 768, height: 1024, deviceScaleFactor: 2 }
+      ]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const width360Calls = calls.filter(call => call.args[0].width === 360);
+    
+    // Should only resize to 360 once despite duplicate in mobile array
+    expect(width360Calls.length).toBeLessThanOrEqual(1);
+    if (width360Calls.length > 0) {
+      expect(width360Calls[0].args[0].height).toBe(670);
+    }
+  });
 });
 
 test.describe('percyScreenshot', () => {

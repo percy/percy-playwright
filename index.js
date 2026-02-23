@@ -8,18 +8,32 @@ const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 const log = utils.logger('playwright');
 
-const getWidthsForMultiDOM = (userPassedWidths, eligibleWidths) => {
-  let allWidths = [];
+const getWidthsForMultiDOM = (userPassedWidths, eligibleWidths, deviceDetails, defaultHeight) => {
+  const widthHeightMap = new Map();
+
+  // Add mobile widths with their associated heights from deviceDetails (if available)
   if (eligibleWidths?.mobile?.length !== 0) {
-    allWidths = allWidths.concat(eligibleWidths?.mobile);
-  }
-  if (userPassedWidths.length !== 0) {
-    allWidths = allWidths.concat(userPassedWidths);
-  } else {
-    allWidths = allWidths.concat(eligibleWidths.config);
+    const mobileWidths = eligibleWidths?.mobile;
+    mobileWidths.forEach(width => {
+      if (!widthHeightMap.has(width)) {
+        const deviceInfo = deviceDetails?.find(device => device.width === width);
+        widthHeightMap.set(width, {
+          width,
+          height: deviceInfo?.height || defaultHeight
+        });
+      }
+    });
   }
 
-  return [...new Set(allWidths)].filter(e => e);
+  // Add user passed or config widths with default height
+  const otherWidths = userPassedWidths.length !== 0 ? userPassedWidths : eligibleWidths.config;
+  otherWidths.forEach(width => {
+    if (!widthHeightMap.has(width)) {
+      widthHeightMap.set(width, { width, height: defaultHeight });
+    }
+  });
+
+  return Array.from(widthHeightMap.values());
 };
 
 async function captureSerializedDOM(page, options, percyDOM) {
@@ -96,7 +110,6 @@ function isResponsiveDOMCaptureValid(options) {
 }
 
 async function captureResponsiveDOM(page, options, percyDOM) {
-  const widths = getWidthsForMultiDOM(options.widths || [], utils.percy?.widths);
   const domSnapshots = [];
   /* istanbul ignore next: no instrumenting injected code */
   const currentViewport = page.viewportSize() || await page.evaluate(() => ({
@@ -114,14 +127,18 @@ async function captureResponsiveDOM(page, options, percyDOM) {
     PercyDOM.waitForResize();
   });
 
-  let height = currentHeight;
+  // Calculate default height for non-mobile widths
+  let defaultHeight = currentHeight;
   if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
     const minHeight = utils.percy?.config?.snapshot?.minHeight;
     /* istanbul ignore next: no instrumenting injected code */
-    height = await page.evaluate((minH) => window.outerHeight - window.innerHeight + minH, minHeight);
+    defaultHeight = await page.evaluate((minH) => window.outerHeight - window.innerHeight + minH, minHeight);
   }
 
-  for (let width of widths) {
+  // Get width and height combinations
+  const widthHeights = getWidthsForMultiDOM(options.widths || [], utils.percy?.widths, utils.percy?.deviceDetails, defaultHeight);
+
+  for (let { width, height } of widthHeights) {
     if (lastWindowWidth !== width) {
       resizeCount++;
       await changeViewportAndWait(page, width, height, resizeCount);
