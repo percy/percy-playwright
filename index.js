@@ -36,7 +36,7 @@ const getWidthsForMultiDOM = (userPassedWidths, eligibleWidths, deviceDetails, d
   return Array.from(widthHeightMap.values());
 };
 
-async function captureSerializedDOM(page, options, percyDOM) {
+async function captureSerializedDOM(page, options, percyDOM, captureWidth = null) {
   /* istanbul ignore next: no instrumenting injected code */
   let domSnapshot = await page.evaluate((options) => {
     /* eslint-disable-next-line no-undef */
@@ -55,10 +55,10 @@ async function captureSerializedDOM(page, options, percyDOM) {
   await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
 
   const processedFrames = await Promise.all(
-    crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM))
+    crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM, captureWidth))
   );
 
-  for (const { iframeData, iframeResource, iframeSnapshot, frameUrl } of processedFrames) {
+  for (const { iframeData, iframeResource, iframeSnapshot, frameUrlWithWidth } of processedFrames) {
     domSnapshot.resources.push(...iframeSnapshot.resources);
     domSnapshot.resources.push(iframeResource);
 
@@ -69,7 +69,7 @@ async function captureSerializedDOM(page, options, percyDOM) {
       /* istanbul ignore next: iframe matching logic depends on DOM structure */
       if (match) {
         const iframeTag = match[1];
-        const newIframeTag = iframeTag.replace(/src="[^"]*"/i, `src="${frameUrl}"`);
+        const newIframeTag = iframeTag.replace(/src="[^"]*"/i, `src="${frameUrlWithWidth}"`);
         domSnapshot.html = domSnapshot.html.replace(iframeTag, newIframeTag);
       }
     }
@@ -154,7 +154,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
       await new Promise(resolve => setTimeout(resolve, parseInt(process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) * 1000));
     }
 
-    let domSnapshot = await captureSerializedDOM(page, options, percyDOM);
+    let domSnapshot = await captureSerializedDOM(page, options, percyDOM, width);
     domSnapshot.width = width;
     domSnapshots.push(domSnapshot);
   }
@@ -172,9 +172,22 @@ async function captureDOM(page, options, percyDOM) {
   }
 }
 
+function buildWidthAwareFrameUrl(frameUrl, captureWidth) {
+  if (!captureWidth) return frameUrl;
+  try {
+    const url = new URL(frameUrl);
+    url.searchParams.set('percy_width', String(captureWidth));
+    return url.toString();
+  } catch (error) {
+    log.debug(`Failed to append width to iframe URL ${frameUrl}`, error);
+    return frameUrl;
+  }
+}
+
 // Processes a single cross-origin frame to capture its snapshot and resources.
-async function processFrame(page, frame, options, percyDOM) {
+async function processFrame(page, frame, options, percyDOM, captureWidth = null) {
   const frameUrl = frame.url();
+  const frameUrlWithWidth = buildWidthAwareFrameUrl(frameUrl, captureWidth);
 
   /* istanbul ignore next: browser-executed iframe serialization */
   // enableJavaScript: true prevents the standard iframe serialization logic from running.
@@ -186,7 +199,7 @@ async function processFrame(page, frame, options, percyDOM) {
 
   // Create a new resource for the iframe's HTML
   const iframeResource = {
-    url: frameUrl,
+    url: frameUrlWithWidth,
     content: iframeSnapshot.html,
     mimetype: 'text/html'
   };
@@ -207,7 +220,7 @@ async function processFrame(page, frame, options, percyDOM) {
     iframeData,
     iframeResource,
     iframeSnapshot,
-    frameUrl
+    frameUrlWithWidth
   };
 }
 
