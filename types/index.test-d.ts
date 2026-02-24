@@ -19,14 +19,10 @@ expectError(percyScreenshot(page));
 expectError(percyScreenshot('Snapshot name'));
 
 expectType<Promise<void>>(percySnapshot(page, 'Snapshot name'));
-expectType<Promise<void>>(
-  percySnapshot(page, 'Snapshot name', { widths: [1000] }),
-);
+expectType<Promise<void>>(percySnapshot(page, 'Snapshot name', { widths: [1000] }));
 
 expectType<Promise<void>>(percyScreenshot(page, 'Snapshot name'));
-expectType<Promise<void>>(
-  percyScreenshot(page, 'Snapshot name', { widths: [1000] }),
-);
+expectType<Promise<void>>(percyScreenshot(page, 'Snapshot name', { widths: [1000] }));
 
 //@ts-expect-error
 expectError(percySnapshot(page, 'Snapshot name', { foo: 'bar' }));
