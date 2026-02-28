@@ -8,34 +8,6 @@ const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 const log = utils.logger('playwright');
 
-const getWidthsForMultiDOM = (userPassedWidths, eligibleWidths, deviceDetails, defaultHeight) => {
-  const widthHeightMap = new Map();
-
-  // Add mobile widths with their associated heights from deviceDetails (if available)
-  if (eligibleWidths?.mobile?.length !== 0) {
-    const mobileWidths = eligibleWidths?.mobile;
-    mobileWidths.forEach(width => {
-      if (!widthHeightMap.has(width)) {
-        const deviceInfo = deviceDetails?.find(device => device.width === width);
-        widthHeightMap.set(width, {
-          width,
-          height: deviceInfo?.height || defaultHeight
-        });
-      }
-    });
-  }
-
-  // Add user passed or config widths with default height
-  const otherWidths = userPassedWidths.length !== 0 ? userPassedWidths : eligibleWidths.config;
-  otherWidths.forEach(width => {
-    if (!widthHeightMap.has(width)) {
-      widthHeightMap.set(width, { width, height: defaultHeight });
-    }
-  });
-
-  return Array.from(widthHeightMap.values());
-};
-
 async function captureSerializedDOM(page, options, percyDOM, captureWidth = null) {
   /* istanbul ignore next: no instrumenting injected code */
   let domSnapshot = await page.evaluate((options) => {
@@ -57,24 +29,7 @@ async function captureSerializedDOM(page, options, percyDOM, captureWidth = null
   const processedFrames = await Promise.all(
     crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM, captureWidth))
   );
-
-  for (const { iframeData, iframeResource, iframeSnapshot, frameUrlWithWidth } of processedFrames) {
-    domSnapshot.resources.push(...iframeSnapshot.resources);
-    domSnapshot.resources.push(iframeResource);
-
-    if (iframeData && iframeData.percyElementId) {
-      const regex = new RegExp(`(<iframe[^>]*data-percy-element-id=["']${iframeData.percyElementId}["'][^>]*>)`);
-      const match = domSnapshot.html.match(regex);
-
-      /* istanbul ignore next: iframe matching logic depends on DOM structure */
-      if (match) {
-        const iframeTag = match[1];
-        const newIframeTag = iframeTag.replace(/src="[^"]*"/i, `src="${frameUrlWithWidth}"`);
-        domSnapshot.html = domSnapshot.html.replace(iframeTag, newIframeTag);
-      }
-    }
-  }
-
+  domSnapshot.corsIframes = processedFrames;
   domSnapshot.cookies = await page.context().cookies();
   return domSnapshot;
 }
@@ -136,9 +91,13 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   }
 
   // Get width and height combinations
-  const widthHeights = getWidthsForMultiDOM(options.widths || [], utils.percy?.widths, utils.percy?.deviceDetails, defaultHeight);
+  if (!utils.getResponsiveWidths) {
+    throw new Error('Update Percy CLI to the latest version to use responsiveSnapshotCapture');
+  }
+  const widthHeights = await utils.getResponsiveWidths(options.widths || []);
 
   for (let { width, height } of widthHeights) {
+    height = height || defaultHeight;
     if (lastWindowWidth !== width) {
       resizeCount++;
       await changeViewportAndWait(page, width, height, resizeCount);
@@ -172,22 +131,9 @@ async function captureDOM(page, options, percyDOM) {
   }
 }
 
-function buildWidthAwareFrameUrl(frameUrl, captureWidth) {
-  if (!captureWidth) return frameUrl;
-  try {
-    const url = new URL(frameUrl);
-    url.searchParams.set('percy_width', String(captureWidth));
-    return url.toString();
-  } catch (error) {
-    log.debug(`Failed to append width to iframe URL ${frameUrl}`, error);
-    return frameUrl;
-  }
-}
-
 // Processes a single cross-origin frame to capture its snapshot and resources.
-async function processFrame(page, frame, options, percyDOM, captureWidth = null) {
+async function processFrame(page, frame, options, percyDOM) {
   const frameUrl = frame.url();
-  const frameUrlWithWidth = buildWidthAwareFrameUrl(frameUrl, captureWidth);
 
   /* istanbul ignore next: browser-executed iframe serialization */
   // enableJavaScript: true prevents the standard iframe serialization logic from running.
@@ -196,13 +142,6 @@ async function processFrame(page, frame, options, percyDOM, captureWidth = null)
     /* eslint-disable-next-line no-undef */
     return PercyDOM.serialize(opts);
   }, { ...options, enableJavascript: true });
-
-  // Create a new resource for the iframe's HTML
-  const iframeResource = {
-    url: frameUrlWithWidth,
-    content: iframeSnapshot.html,
-    mimetype: 'text/html'
-  };
 
   // Get the iframe's element data from the main page context
   /* istanbul ignore next: browser-executed evaluation function */
@@ -218,9 +157,8 @@ async function processFrame(page, frame, options, percyDOM, captureWidth = null)
 
   return {
     iframeData,
-    iframeResource,
     iframeSnapshot,
-    frameUrlWithWidth
+    frameUrl
   };
 }
 
