@@ -139,6 +139,12 @@ async function captureResponsiveDOM(page, options, percyDOM) {
     if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
       await page.reload();
       await page.evaluate(percyDOM);
+      /* istanbul ignore next: no instrumenting injected code */
+      await page.evaluate(() => {
+        /* eslint-disable-next-line no-undef */
+        PercyDOM.waitForResize();
+      });
+      resizeCount = 0; // Reset local counter to match window.resizeCount after reload
     }
 
     if (process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) {
