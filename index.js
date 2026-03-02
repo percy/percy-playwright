@@ -39,7 +39,7 @@ async function processFrame(page, frame, options, percyDOM) {
   };
 }
 
-async function captureSerializedDOM(page, options, percyDOM, captureWidth = null) {
+async function captureSerializedDOM(page, options, percyDOM) {
   /* istanbul ignore next: no instrumenting injected code */
   let domSnapshot = await page.evaluate((options) => {
     /* eslint-disable-next-line no-undef */
@@ -58,7 +58,7 @@ async function captureSerializedDOM(page, options, percyDOM, captureWidth = null
   await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
 
   const processedFrames = await Promise.all(
-    crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM, captureWidth))
+    crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM))
   );
   domSnapshot.corsIframes = processedFrames;
   domSnapshot.cookies = await page.context().cookies();
