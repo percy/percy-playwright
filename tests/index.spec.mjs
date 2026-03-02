@@ -569,12 +569,12 @@ test.describe('percySnapshot', () => {
     
     const calls = setViewportSizeSpy.getCalls();
     const mobile360Call = calls.find(call => call.args[0].width === 360);
-    const mobile768Call = calls.find(call => call.args[0].width === 390);
+    const mobile390Call = calls.find(call => call.args[0].width === 390);
     
     expect(mobile360Call).toBeDefined();
     expect(mobile360Call.args[0].height).toBe(720);
-    expect(mobile768Call).toBeDefined();
-    expect(mobile768Call.args[0].height).toBe(720); // uses defaultHeight
+    expect(mobile390Call).toBeDefined();
+    expect(mobile390Call.args[0].height).toBe(720); // uses defaultHeight
   });
 
   test('deduplicates widths and prioritizes mobile widths with device heights', async ({ page }) => {
