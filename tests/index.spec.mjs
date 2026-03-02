@@ -482,7 +482,6 @@ test.describe('percySnapshot', () => {
     await helpers.test('config', { config: [1280], mobile: [] });
     
     // Mock viewportSize to return null so it falls back to page.evaluate
-    const originalViewportSize = page.viewportSize;
     sinon.stub(page, 'viewportSize').returns(null);
     
     // Mock page.evaluate to return viewport dimensions when called for window.innerWidth/innerHeight
