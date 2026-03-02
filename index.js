@@ -128,35 +128,37 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   }
   const widthHeights = await utils.getResponsiveWidths(options.widths || []);
 
-  for (let { width, height } of widthHeights) {
-    height = height || defaultHeight;
-    if (lastWindowWidth !== width) {
-      resizeCount++;
-      await changeViewportAndWait(page, width, height, resizeCount);
-      lastWindowWidth = width;
-    }
+  try {
+    for (let { width, height } of widthHeights) {
+      height = height || defaultHeight;
+      if (lastWindowWidth !== width) {
+        resizeCount++;
+        await changeViewportAndWait(page, width, height, resizeCount);
+        lastWindowWidth = width;
+      }
 
-    if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
-      await page.reload();
-      await page.evaluate(percyDOM);
-      /* istanbul ignore next: no instrumenting injected code */
-      await page.evaluate(() => {
-        /* eslint-disable-next-line no-undef */
-        PercyDOM.waitForResize();
-      });
-      resizeCount = 0; // Reset local counter to match window.resizeCount after reload
-    }
+      if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
+        await page.reload();
+        await page.evaluate(percyDOM);
+        /* istanbul ignore next: no instrumenting injected code */
+        await page.evaluate(() => {
+          /* eslint-disable-next-line no-undef */
+          PercyDOM.waitForResize();
+        });
+        resizeCount = 0; // Reset local counter to match window.resizeCount after reload
+      }
 
-    if (process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) {
-      await new Promise(resolve => setTimeout(resolve, parseInt(process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) * 1000));
-    }
+      if (process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) {
+        await new Promise(resolve => setTimeout(resolve, parseInt(process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) * 1000));
+      }
 
-    let domSnapshot = await captureSerializedDOM(page, options, percyDOM);
-    domSnapshot.width = width;
-    domSnapshots.push(domSnapshot);
+      let domSnapshot = await captureSerializedDOM(page, options, percyDOM);
+      domSnapshot.width = width;
+      domSnapshots.push(domSnapshot);
+    }
+  } finally {
+    await changeViewportAndWait(page, currentWidth, currentHeight, resizeCount + 1);
   }
-
-  await changeViewportAndWait(page, currentWidth, currentHeight, resizeCount + 1);
   return domSnapshots;
 }
 
