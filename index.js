@@ -151,7 +151,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
       await new Promise(resolve => setTimeout(resolve, parseInt(process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) * 1000));
     }
 
-    let domSnapshot = await captureSerializedDOM(page, options, percyDOM, width);
+    let domSnapshot = await captureSerializedDOM(page, options, percyDOM);
     domSnapshot.width = width;
     domSnapshots.push(domSnapshot);
   }
