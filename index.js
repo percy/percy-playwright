@@ -71,7 +71,15 @@ const percySnapshot = async function(page, name, options) {
     // This section only handles cross-origin iframe serialization and resource merging.
     const pageUrl = new URL(page.url());
     const crossOriginFrames = page.frames()
-      .filter(frame => frame.url() !== 'about:blank' && new URL(frame.url()).origin !== pageUrl.origin);
+      .filter(frame => {
+        const frameUrl = frame.url();
+        if (!frameUrl || frameUrl === 'about:blank') return false;
+        try {
+          return new URL(frameUrl).origin !== pageUrl.origin;
+        } catch {
+          return false;
+        }
+      });
 
     // Inject Percy DOM into all cross-origin frames before processing them in parallel
     await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
