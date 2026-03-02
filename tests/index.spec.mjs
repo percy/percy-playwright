@@ -589,10 +589,8 @@ test.describe('percySnapshot', () => {
     const calls = setViewportSizeSpy.getCalls();
     const width768Calls = calls.filter(call => call.args[0].width === 768);
     
-    expect(width768Calls.length).toBeLessThanOrEqual(1); // No duplicates
-    if (width768Calls.length > 0) {
-      expect(width768Calls[0].args[0].height).toBe(1024); // Uses device height
-    }
+    expect(width768Calls.length).toBe(1); // No duplicates
+    expect(width768Calls[0].args[0].height).toBe(1024); // Uses device height
   });
 
   test('handles duplicate widths in mobile array', async ({ page }) => {
@@ -613,10 +611,8 @@ test.describe('percySnapshot', () => {
     const width360Calls = calls.filter(call => call.args[0].width === 360);
     
     // Should only resize to 360 once despite duplicate in mobile array
-    expect(width360Calls.length).toBeLessThanOrEqual(1);
-    if (width360Calls.length > 0) {
-      expect(width360Calls[0].args[0].height).toBe(670);
-    }
+    expect(width360Calls.length).toBe(1);
+    expect(width360Calls[0].args[0].height).toBe(670);
   });
 });
 
