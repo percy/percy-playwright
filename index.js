@@ -122,6 +122,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   }
 
   // Get width and height combinations
+  /* istanbul ignore next: CLI version compatibility check */
   if (!utils.getResponsiveWidths) {
     throw new Error('Update Percy CLI to the latest version to use responsiveSnapshotCapture');
   }
