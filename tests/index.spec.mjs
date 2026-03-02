@@ -247,6 +247,21 @@ test.describe('percySnapshot', () => {
     await percySnapshot(page, 'Snapshot with invalid URLs');
   });
 
+  test('processes valid cross-origin frame URLs (coverage for URL parsing)', async ({ page }) => {
+    const crossOriginFrame = { url: () => 'https://cross-origin.com/frame', evaluate: sinon.stub().resolves({ html: '<html></html>', resources: [] }) };
+
+    sinon.stub(page, 'frames').returns([{ url: () => 'https://main-site.com' }, crossOriginFrame]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+    sinon.stub(page, 'evaluate').callsFake((func) => {
+      if (typeof func === 'string') return Promise.resolve();
+      if (func.toString().includes('PercyDOM.serialize')) return Promise.resolve({ html: '', resources: [] });
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with cross-origin frame for URL parsing');
+    expect(crossOriginFrame.evaluate.called).toBe(true);
+  });
+
   test('filters out about:blank frames', async ({ page }) => {
     const blankFrame = { url: () => 'about:blank', evaluate: sinon.stub() };
     const validFrame = { url: () => 'https://cross-origin.com', evaluate: sinon.stub().resolves({}) };
