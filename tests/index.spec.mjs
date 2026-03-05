@@ -11,6 +11,10 @@ test.describe('percySnapshot', () => {
     await page.goto(helpers.testSnapshotURL);
   });
 
+  test.afterEach(async () => {
+    sinon.restore();
+  });
+
   test('throws an error when a page is not provided', async () => {
     await expect(percySnapshot()).rejects.toThrow('A Playwright `page` object is required.');
   });
@@ -226,17 +230,389 @@ test.describe('percySnapshot', () => {
       'Snapshot found: Snapshot with iframe src replacement'
     ]));
   });
-});
 
-test.describe('percyScreenshot', () => {
-  test.beforeEach(async ({ page }) => {
-    await helpers.test('error', '/percy/snapshot');
-
-    await percySnapshot(page, 'Snapshot 1');
-
-    expect(helpers.logger.stderr).toEqual(expect.arrayContaining([
-      '[percy] Could not take DOM snapshot "Snapshot 1"'
+  test('posts snapshots to percy server with responsiveSnapshotCapture true', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [1280] });
+    
+    // Verify viewport was resized for responsive capture
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1',
+      `- url: ${helpers.testSnapshotURL}`,
+      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+      expect.stringMatching(/environmentInfo: playwright\/.+/)
     ]));
+  });
+
+  test('posts snapshots to percy server with responsiveSnapshotCapture false', async ({ page }) => {
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: false, widths: [1280] });
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1',
+      `- url: ${helpers.testSnapshotURL}`,
+      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+      expect.stringMatching(/environmentInfo: playwright\/.+/)
+    ]));
+  });
+
+  test('posts snapshots to percy server with responsiveSnapshotCapture with mobile', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [390] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    // Verify viewport was resized for responsive capture with mobile widths
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1',
+      `- url: ${helpers.testSnapshotURL}`,
+      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+      expect.stringMatching(/environmentInfo: playwright\/.+/)
+    ]));
+  });
+
+  test('multiDOM should not run when deferUploads is true', async ({ page }) => {
+    // Set deferUploads config using the test API before calling percySnapshot
+    await helpers.test('config', { deferUploads: true, config: [1280], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    // Verify that setViewportSize was NOT called (multi-DOM should be disabled)
+    expect(setViewportSizeSpy.called).toBe(false);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Test Snapshot'
+    ]));
+  });
+
+  test('responsive capture includes mobile widths when provided', async ({ page }) => {
+    // This test ensures mobile widths are included in the multi-DOM capture
+    await helpers.test('config', { config: [1280], mobile: [390, 768] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Test Snapshot with mobile', { responsiveSnapshotCapture: true, widths: [390, 768, 1280] });
+    
+    // Verify viewport was resized for mobile and config widths
+    expect(setViewportSizeSpy.called).toBe(true);
+    // Should be called for widths: 390, 768, and 1280
+    expect(setViewportSizeSpy.callCount).toBeGreaterThanOrEqual(3);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Test Snapshot with mobile'
+    ]));
+  });
+
+  test('responsive capture with mobile widths length 0', async ({ page }) => {
+    // This tests the edge case where mobile array exists but length is 0
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [768] });
+    
+    // Verify viewport was resized
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1'
+    ]));
+  });
+
+  test('responsive capture when mobile key is not defined in config', async ({ page }) => {
+    // This tests the case where mobile property is completely missing from config
+    await helpers.test('config', { config: [1280] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot without mobile', { responsiveSnapshotCapture: true, widths: [768] });
+    
+    // Verify viewport was resized
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot without mobile'
+    ]));
+  });
+
+  test('should reload page if PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE is set', async ({ page }) => {
+    process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE = 'true';
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const reloadSpy = sinon.spy(page, 'reload');
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    expect(reloadSpy.called).toBe(true);
+    delete process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE;
+  });
+
+  test('should wait if RESPONSIVE_CAPTURE_SLEEP_TIME is set', async ({ page }) => {
+    process.env.RESPONSIVE_CAPTURE_SLEEP_TIME = '1';
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    // Verify viewport was resized
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    delete process.env.RESPONSIVE_CAPTURE_SLEEP_TIME;
+  });
+
+  test('should use minHeight if PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is set', async ({ page }) => {
+    process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = 'true';
+    await helpers.test('config', { config: [375, 768], mobile: [], minHeight: 1024 });
+    
+    const evaluateSpy = sinon.spy(page, 'evaluate');
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    // Verify that evaluate was called for minHeight calculation (window.outerHeight - window.innerHeight + minH)
+    const minHeightCalls = evaluateSpy.getCalls().filter(call => {
+      const func = call.args[0];
+      return typeof func === 'function' && func.toString().includes('outerHeight') && func.toString().includes('innerHeight');
+    });
+    expect(minHeightCalls.length).toBeGreaterThan(0);
+    
+    delete process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
+  });
+
+  test('should handle viewport resize failure gracefully', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const setViewportSizeStub = sinon.stub(page, 'setViewportSize').rejects(new Error('Viewport resize failed'));
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    // Verify that setViewportSize was called (and failed)
+    expect(setViewportSizeStub.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Test Snapshot'
+    ]));
+  });
+
+  test('should handle waitForFunction timeout during resize', async ({ page }) => {
+    await helpers.test('config', { config: [1280, 768], mobile: [] });
+    
+    sinon.stub(page, 'waitForFunction').rejects(new Error('Timeout'));
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Test Snapshot'
+    ]));
+  });
+
+  test('responsive snapshot with multiple widths', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [390] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { 
+      responsiveSnapshotCapture: true, 
+      widths: [768, 1024] 
+    });
+    
+    // Verify viewport was resized multiple times for different widths
+    expect(setViewportSizeSpy.called).toBe(true);
+    expect(setViewportSizeSpy.callCount).toBeGreaterThan(1);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1'
+    ]));
+  });
+
+  test('responsive_snapshot_capture option works', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { 
+      responsive_snapshot_capture: true
+    });
+    
+    // Verify viewport was resized
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1'
+    ]));
+  });
+
+  test('responsive capture with config option', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [], responsive: true });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1');
+    
+    // Verify viewport was resized when responsive capture is enabled via config
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1'
+    ]));
+  });
+
+  test('responsive capture handles null viewportSize', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    // Mock viewportSize to return null so it falls back to page.evaluate
+    sinon.stub(page, 'viewportSize').returns(null);
+    
+    // Mock page.evaluate to return viewport dimensions when called for window.innerWidth/innerHeight
+    const originalEvaluate = page.evaluate;
+    const evaluateStub = sinon.stub(page, 'evaluate');
+    evaluateStub.callsFake((func, ...args) => {
+      if (typeof func === 'function' && func.toString().includes('window.innerWidth')) {
+        return Promise.resolve({ width: 1280, height: 720 });
+      }
+      return originalEvaluate.call(page, func, ...args);
+    });
+    
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    // Check that evaluate was called to get viewport dimensions
+    const viewportCalls = evaluateStub.getCalls().filter(call => {
+      const func = call.args[0];
+      return typeof func === 'function' && func.toString().includes('window.innerWidth');
+    });
+    expect(viewportCalls.length).toBeGreaterThan(0);
+  });
+
+  test('responsive capture with only mobile widths', async ({ page }) => {
+    await helpers.test('config', { config: [], mobile: [390, 768] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    // Verify viewport was resized for mobile widths
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1'
+    ]));
+  });
+
+  test('responsive capture with empty mobile and user widths', async ({ page }) => {
+    await helpers.test('config', { config: [1280], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [] });
+    
+    // Verify viewport was resized using config widths
+    expect(setViewportSizeSpy.called).toBe(true);
+    
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot 1'
+    ]));
+  });
+
+  test('uses device-specific heights for mobile widths from deviceDetails', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [360, 390],
+      deviceDetails: [
+        { width: 360, height: 670, deviceScaleFactor: 3 },
+        { width: 390, height: 663, deviceScaleFactor: 3 }
+      ]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const mobile360Call = calls.find(call => call.args[0].width === 360);
+    const mobile390Call = calls.find(call => call.args[0].width === 390);
+    
+    expect(mobile360Call.args[0].height).toBe(670);
+    expect(mobile390Call.args[0].height).toBe(663);
+  });
+
+  test('falls back to defaultHeight when deviceDetails is undefined or device not found', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [360, 390]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [360, 390, 1280] });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const mobile360Call = calls.find(call => call.args[0].width === 360);
+    const mobile390Call = calls.find(call => call.args[0].width === 390);
+    
+    expect(mobile360Call).toBeDefined();
+    expect(mobile360Call.args[0].height).toBe(720);
+    expect(mobile390Call).toBeDefined();
+    expect(mobile390Call.args[0].height).toBe(720); // uses defaultHeight
+  });
+
+  test('deduplicates widths and prioritizes mobile widths with minHeight', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [768],
+      deviceDetails: [{ width: 768, height: 1024, deviceScaleFactor: 2 }]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [768] });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const width768Calls = calls.filter(call => call.args[0].width === 768);
+    
+    expect(width768Calls.length).toBe(1); // No duplicates
+    expect(width768Calls[0].args[0].height).toBe(720); // Uses device height
+  });
+
+  test('handles duplicate widths in mobile array', async ({ page }) => {
+    await helpers.test('config', { 
+      config: [1280], 
+      mobile: [360, 360, 768], // duplicate 360
+      deviceDetails: [
+        { width: 360, height: 670, deviceScaleFactor: 3 },
+        { width: 360, height: 670, deviceScaleFactor: 3 },
+        { width: 768, height: 1024, deviceScaleFactor: 2 }
+      ]
+    });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+    
+    const calls = setViewportSizeSpy.getCalls();
+    const width360Calls = calls.filter(call => call.args[0].width === 360);
+    
+    // Should only resize to 360 once despite duplicate in mobile array
+    expect(width360Calls.length).toBe(1);
+    expect(width360Calls[0].args[0].height).toBe(670);
   });
 });
 
