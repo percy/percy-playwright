@@ -113,7 +113,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
 
   // Calculate default height for non-mobile widths
   let defaultHeight = currentHeight;
-  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT === 'true') {
+  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true') {
     const minHeight = utils.percy?.config?.snapshot?.minHeight;
     /* istanbul ignore next: no instrumenting injected code */
     defaultHeight = await page.evaluate((minH) => window.outerHeight - window.innerHeight + minH, minHeight);
@@ -135,7 +135,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
         lastWindowWidth = width;
       }
 
-      if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE === 'true') {
+      if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE?.toLowerCase() === 'true') {
         await page.reload();
         await page.evaluate(percyDOM);
         /* istanbul ignore next: no instrumenting injected code */
