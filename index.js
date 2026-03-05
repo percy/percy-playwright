@@ -70,7 +70,7 @@ async function changeViewportAndWait(page, width, height, resizeCount) {
     await page.setViewportSize({ width, height });
   } catch (error) {
     log.debug(`Resizing using setViewportSize failed for width ${width}`, error);
-    return false;
+    return;
   }
 
   try {
@@ -79,8 +79,6 @@ async function changeViewportAndWait(page, width, height, resizeCount) {
   } catch (error) {
     log.debug(`Timed out waiting for window resize event for width ${width}`, error);
   }
-
-  return true;
 }
 
 function isResponsiveDOMCaptureValid(options) {
@@ -115,7 +113,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
 
   // Calculate default height for non-mobile widths
   let defaultHeight = currentHeight;
-  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT) {
+  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT === 'true') {
     const minHeight = utils.percy?.config?.snapshot?.minHeight;
     /* istanbul ignore next: no instrumenting injected code */
     defaultHeight = await page.evaluate((minH) => window.outerHeight - window.innerHeight + minH, minHeight);
@@ -137,7 +135,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
         lastWindowWidth = width;
       }
 
-      if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE) {
+      if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE === 'true') {
         await page.reload();
         await page.evaluate(percyDOM);
         /* istanbul ignore next: no instrumenting injected code */

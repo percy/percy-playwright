@@ -576,7 +576,7 @@ test.describe('percySnapshot', () => {
     expect(mobile390Call.args[0].height).toBe(720); // uses defaultHeight
   });
 
-  test('deduplicates widths and prioritizes mobile widths with device heights', async ({ page }) => {
+  test('deduplicates widths and prioritizes mobile widths with minHeight', async ({ page }) => {
     await helpers.test('config', { 
       config: [1280], 
       mobile: [768],
@@ -590,7 +590,7 @@ test.describe('percySnapshot', () => {
     const width768Calls = calls.filter(call => call.args[0].width === 768);
     
     expect(width768Calls.length).toBe(1); // No duplicates
-    expect(width768Calls[0].args[0].height).toBe(1024); // Uses device height
+    expect(width768Calls[0].args[0].height).toBe(720); // Uses device height
   });
 
   test('handles duplicate widths in mobile array', async ({ page }) => {
