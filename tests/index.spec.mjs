@@ -472,6 +472,36 @@ test.describe('percySnapshot', () => {
     delete process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
   });
 
+  test('should prioritize options.minHeight over config minHeight when PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT is set', async ({ page }) => {
+    process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = 'true';
+    await helpers.test('config', { config: [375, 768], mobile: [], minHeight: 1024 });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true, minHeight: 2048 });
+    
+    expect(setViewportSizeSpy.called).toBe(true);
+    expect(setViewportSizeSpy.calledWithMatch({ height: 2048 })).toBe(true);
+    
+    delete process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
+  });
+
+  test('should use currentHeight when neither options.minHeight nor config minHeight is set with PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT', async ({ page }) => {
+    process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = 'true';
+    await helpers.test('config', { config: [375, 768], mobile: [] });
+    
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
+    
+    await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
+    
+    expect(setViewportSizeSpy.called).toBe(true);
+    // Should maintain the current viewport height
+    const firstCall = setViewportSizeSpy.getCall(0);
+    expect(firstCall.args[0]).toHaveProperty('height');
+    
+    delete process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
+  });
+
   test('should handle viewport resize failure gracefully', async ({ page }) => {
     await helpers.test('config', { config: [1280], mobile: [] });
     
