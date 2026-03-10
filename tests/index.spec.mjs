@@ -34,11 +34,11 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
-    test('posts snapshots to the local percy server', async ({ page }) => {
+  test('posts snapshots to the local percy server', async ({ page }) => {
     await percySnapshot(page, 'Snapshot 1');
     await percySnapshot(page, 'Snapshot 2');
     await percySnapshot(page, 'Snapshot 3', { sync: true });
-    
+
     // Add delay to ensure logs are captured
     // temp for alpha release
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -57,12 +57,12 @@ test.describe('percySnapshot', () => {
   test('adds cookies to domSnapshot', async ({ page }) => {
     const mockCookies = [{ name: 'test_cookie', value: 'test_value', domain: 'example.com' }];
     sinon.stub(page.context(), 'cookies').resolves(mockCookies);
-  
+
     const domSnapshot = { html: '<html></html>' };
     sinon.stub(page, 'evaluate').resolves(domSnapshot);
-  
+
     await percySnapshot(page, 'Snapshot with Cookies');
-  
+
     expect(domSnapshot.cookies).toEqual(mockCookies);
   });
 
@@ -79,7 +79,7 @@ test.describe('percySnapshot', () => {
   test('processes cross-origin iframe with percy-element-id matching', async ({ page }) => {
     // Mock page.evaluate to return a specific DOM snapshot with iframe
     const mockDomSnapshot = {
-      html: `<html><body><h1>Main Page</h1><iframe src="about:blank" data-percy-element-id="iframe-1"></iframe></body></html>`,
+      html: '<html><body><h1>Main Page</h1><iframe src="about:blank" data-percy-element-id="iframe-1"></iframe></body></html>',
       resources: []
     };
 
@@ -127,7 +127,7 @@ test.describe('percySnapshot', () => {
   test('handles iframe processing without percy-element-id match', async ({ page }) => {
     // Mock page.evaluate to return a DOM snapshot without matching percy-element-id
     const mockDomSnapshot = {
-      html: `<html><body><h1>Main Page</h1><iframe src="about:blank" data-percy-element-id="different-id"></iframe></body></html>`,
+      html: '<html><body><h1>Main Page</h1><iframe src="about:blank" data-percy-element-id="different-id"></iframe></body></html>',
       resources: []
     };
 
@@ -198,27 +198,27 @@ test.describe('percySnapshot', () => {
     const originalPageEvaluate = page.evaluate;
     sinon.stub(page, 'evaluate').callsFake((func, ...args) => {
       evaluateCallCount++;
-      
+
       if (typeof func === 'string') {
         // percyDOM injection
         return Promise.resolve();
       }
-      
+
       if (func.toString().includes('PercyDOM.serialize')) {
         // DOM serialization - return HTML with iframe that has percy-element-id
         return Promise.resolve({
-          html: `<html><body><h1>Main Page</h1><iframe src="https://cross-origin.com/frame" data-percy-element-id="test-iframe-1"></iframe></body></html>`,
+          html: '<html><body><h1>Main Page</h1><iframe src="https://cross-origin.com/frame" data-percy-element-id="test-iframe-1"></iframe></body></html>',
           resources: []
         });
       }
-      
+
       if (func.toString().includes('iframes.find')) {
         // iframe data retrieval - return matching iframe data
         return Promise.resolve({
           percyElementId: 'test-iframe-1'
         });
       }
-      
+
       // other functions
       return Promise.resolve();
     });
@@ -229,6 +229,87 @@ test.describe('percySnapshot', () => {
     expect(logs).toEqual(expect.arrayContaining([
       'Snapshot found: Snapshot with iframe src replacement'
     ]));
+  });
+
+  test('handles invalid iframe URLs without throwing', async ({ page }) => {
+    const invalidFrame = { url: () => 'widget://app', evaluate: sinon.stub() };
+    const validFrame = { url: () => 'https://cross-origin.com', evaluate: sinon.stub().resolves({}) };
+
+    sinon.stub(page, 'frames').returns([
+      { url: () => 'https://main-site.com' },
+      invalidFrame,
+      validFrame
+    ]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+    sinon.stub(page, 'evaluate').callsFake((func) => {
+      if (typeof func === 'string') return Promise.resolve();
+      if (func.toString().includes('PercyDOM.serialize')) return Promise.resolve({ html: '', resources: [] });
+      return Promise.resolve();
+    });
+
+    // Should not throw even with invalid frame URL
+    await percySnapshot(page, 'Snapshot with invalid URLs');
+  });
+
+  test('processes valid cross-origin frame URLs (coverage for URL parsing)', async ({ page }) => {
+    const crossOriginFrame = { url: () => 'https://cross-origin.com/frame', evaluate: sinon.stub().resolves({ html: '<html></html>', resources: [] }) };
+
+    sinon.stub(page, 'frames').returns([{ url: () => 'https://main-site.com' }, crossOriginFrame]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+    sinon.stub(page, 'evaluate').callsFake((func) => {
+      if (typeof func === 'string') return Promise.resolve();
+      if (func.toString().includes('PercyDOM.serialize')) return Promise.resolve({ html: '', resources: [] });
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with cross-origin frame for URL parsing');
+    expect(crossOriginFrame.evaluate.called).toBe(true);
+  });
+
+  test('skips frames that throw when parsing URL', async ({ page }) => {
+    const throwingFrame = { url: () => 'not a url', evaluate: sinon.stub() };
+    const validFrame = { url: () => 'https://cross-origin.com', evaluate: sinon.stub().resolves({ html: '<html></html>', resources: [] }) };
+
+    sinon.stub(page, 'frames').returns([{ url: () => 'https://main-site.com' }, throwingFrame, validFrame]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+    sinon.stub(page, 'evaluate').callsFake((func) => {
+      if (typeof func === 'string') return Promise.resolve();
+      if (func.toString().includes('PercyDOM.serialize')) return Promise.resolve({ html: '', resources: [] });
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with throwing url');
+    expect(validFrame.evaluate.called).toBe(true);
+  });
+
+  test('filters out about:blank frames', async ({ page }) => {
+    const blankFrame = { url: () => 'about:blank', evaluate: sinon.stub() };
+    const validFrame = { url: () => 'https://cross-origin.com', evaluate: sinon.stub().resolves({}) };
+
+    sinon.stub(page, 'frames').returns([{ url: () => 'https://main-site.com' }, blankFrame, validFrame]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+    sinon.stub(page, 'evaluate').callsFake((func) => {
+      if (typeof func === 'string') return Promise.resolve();
+      if (func.toString().includes('PercyDOM.serialize')) return Promise.resolve({ html: '', resources: [] });
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot filtering blank');
+  });
+
+  test('filters frames with null or undefined URLs', async ({ page }) => {
+    const nullFrame = { url: () => null, evaluate: sinon.stub() };
+    const validFrame = { url: () => 'https://cross-origin.com', evaluate: sinon.stub().resolves({}) };
+
+    sinon.stub(page, 'frames').returns([{ url: () => 'https://main-site.com' }, nullFrame, validFrame]);
+    sinon.stub(page, 'url').returns('https://main-site.com');
+    sinon.stub(page, 'evaluate').callsFake((func) => {
+      if (typeof func === 'string') return Promise.resolve();
+      if (func.toString().includes('PercyDOM.serialize')) return Promise.resolve({ html: '', resources: [] });
+      return Promise.resolve();
+    });
+
+    await percySnapshot(page, 'Snapshot with null URLs');
   });
 
   test('posts snapshots to percy server with responsiveSnapshotCapture true', async ({ page }) => {
@@ -755,5 +836,3 @@ test.describe('createRegion', () => {
     expect(region.configuration.adsEnabled).toBe(true);
   });
 });
-
-

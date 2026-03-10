@@ -46,13 +46,21 @@ async function captureSerializedDOM(page, options, percyDOM) {
     return PercyDOM.serialize(options);
   }, options);
 
-  // Process CORS IFrames
-  // Note: Blob URL handling (data-src images, blob background images) is now handled
-  // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
-  // This section only handles cross-origin iframe serialization and resource merging.
-  const pageUrl = new URL(page.url());
-  const crossOriginFrames = page.frames()
-    .filter(frame => frame.url() !== 'about:blank' && new URL(frame.url()).origin !== pageUrl.origin);
+    // Process CORS IFrames
+    // Note: Blob URL handling (data-src images, blob background images) is now handled
+    // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
+    // This section only handles cross-origin iframe serialization and resource merging.
+    const pageUrl = new URL(page.url());
+    const crossOriginFrames = page.frames()
+      .filter(frame => {
+        const frameUrl = frame.url();
+        if (!frameUrl || frameUrl === 'about:blank') return false;
+        try {
+          return new URL(frameUrl).origin !== pageUrl.origin;
+        } catch {
+          return false;
+        }
+      });
 
   // Inject Percy DOM into all cross-origin frames before processing them in parallel
   await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
