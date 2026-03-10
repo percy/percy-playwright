@@ -462,16 +462,12 @@ test.describe('percySnapshot', () => {
     process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT = 'true';
     await helpers.test('config', { config: [375, 768], mobile: [], minHeight: 1024 });
     
-    const evaluateSpy = sinon.spy(page, 'evaluate');
+    const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
     
     await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
     
-    // Verify that evaluate was called for minHeight calculation (window.outerHeight - window.innerHeight + minH)
-    const minHeightCalls = evaluateSpy.getCalls().filter(call => {
-      const func = call.args[0];
-      return typeof func === 'function' && func.toString().includes('outerHeight') && func.toString().includes('innerHeight');
-    });
-    expect(minHeightCalls.length).toBeGreaterThan(0);
+    expect(setViewportSizeSpy.called).toBe(true);
+    expect(setViewportSizeSpy.calledWithMatch({ height: 1024 })).toBe(true);
     
     delete process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT;
   });
