@@ -20,13 +20,6 @@ async function processFrame(page, frame, options, percyDOM) {
     return PercyDOM.serialize(opts);
   }, { ...options, enableJavascript: true });
 
-  // Create a new resource for the iframe's HTML
-  const iframeResource = {
-    url: frameUrl,
-    content: iframeSnapshot.html,
-    mimetype: 'text/html'
-  };
-
   // Get the iframe's element data from the main page context
   /* istanbul ignore next: browser-executed evaluation function */
   const iframeData = await page.evaluate((fUrl) => {
@@ -41,10 +34,153 @@ async function processFrame(page, frame, options, percyDOM) {
 
   return {
     iframeData,
-    iframeResource,
     iframeSnapshot,
     frameUrl
   };
+}
+
+async function captureSerializedDOM(page, options, percyDOM) {
+  /* istanbul ignore next: no instrumenting injected code */
+  let domSnapshot = await page.evaluate((options) => {
+    /* eslint-disable-next-line no-undef */
+    return PercyDOM.serialize(options);
+  }, options);
+
+  // Process CORS IFrames
+  // Note: Blob URL handling (data-src images, blob background images) is now handled
+  // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
+  // This section only handles cross-origin iframe serialization and resource merging.
+  const pageUrl = new URL(page.url());
+  const crossOriginFrames = page.frames()
+    .filter(frame => {
+      const frameUrl = frame.url();
+      if (!frameUrl || frameUrl === 'about:blank') return false;
+      try {
+        return new URL(frameUrl).origin !== pageUrl.origin;
+      } catch {
+        return false;
+      }
+    });
+
+  // Inject Percy DOM into all cross-origin frames before processing them in parallel
+  await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
+
+  const processedFrames = await Promise.all(
+    crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM))
+  );
+  domSnapshot.corsIframes = processedFrames;
+  domSnapshot.cookies = await page.context().cookies();
+  return domSnapshot;
+}
+
+async function changeViewportAndWait(page, width, height, resizeCount) {
+  try {
+    await page.setViewportSize({ width, height });
+  } catch (error) {
+    log.debug(`Resizing using setViewportSize failed for width ${width}`, error);
+    return;
+  }
+
+  try {
+    /* istanbul ignore next: no instrumenting injected code */
+    await page.waitForFunction((count) => window.resizeCount === count, resizeCount, { timeout: 1000 });
+  } catch (error) {
+    log.debug(`Timed out waiting for window resize event for width ${width}`, error);
+  }
+}
+
+function isResponsiveDOMCaptureValid(options) {
+  if (utils.percy?.config?.percy?.deferUploads) {
+    return false;
+  }
+  return (
+    options?.responsive_snapshot_capture ||
+    options?.responsiveSnapshotCapture ||
+    utils.percy?.config?.snapshot?.responsiveSnapshotCapture ||
+    false
+  );
+}
+
+async function captureResponsiveDOM(page, options, percyDOM) {
+  const domSnapshots = [];
+  /* istanbul ignore next: no instrumenting injected code */
+  const currentViewport = page.viewportSize() || await page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight
+  }));
+  let currentWidth = currentViewport.width;
+  let currentHeight = currentViewport.height;
+  let lastWindowWidth = currentWidth;
+  let resizeCount = 0;
+
+  /* istanbul ignore next: no instrumenting injected code */
+  await page.evaluate(() => {
+    /* eslint-disable-next-line no-undef */
+    PercyDOM.waitForResize();
+  });
+
+  // Calculate default height for non-mobile widths
+  let defaultHeight = currentHeight;
+  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true') {
+    if (options.minHeight) {
+      defaultHeight = options.minHeight;
+    } else {
+      const configMinHeight = utils.percy?.config?.snapshot?.minHeight;
+      /* istanbul ignore else: CLI always provides default value for config.snapshot */
+      if (configMinHeight) {
+        defaultHeight = configMinHeight;
+      }
+    }
+  }
+
+  // Get width and height combinations
+  /* istanbul ignore next: CLI version compatibility check */
+  if (!utils.getResponsiveWidths) {
+    throw new Error('Update Percy CLI to the latest version to use responsiveSnapshotCapture');
+  }
+  const widthHeights = await utils.getResponsiveWidths(options.widths || []);
+
+  try {
+    for (let { width, height } of widthHeights) {
+      height = height || defaultHeight;
+      if (lastWindowWidth !== width) {
+        resizeCount++;
+        await changeViewportAndWait(page, width, height, resizeCount);
+        lastWindowWidth = width;
+      }
+
+      if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE?.toLowerCase() === 'true') {
+        await page.reload();
+        await page.evaluate(percyDOM);
+        /* istanbul ignore next: no instrumenting injected code */
+        await page.evaluate(() => {
+          /* eslint-disable-next-line no-undef */
+          PercyDOM.waitForResize();
+        });
+        resizeCount = 0; // Reset local counter to match window.resizeCount after reload
+      }
+
+      if (process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) {
+        await new Promise(resolve => setTimeout(resolve, parseInt(process.env.RESPONSIVE_CAPTURE_SLEEP_TIME) * 1000));
+      }
+
+      let domSnapshot = await captureSerializedDOM(page, options, percyDOM);
+      domSnapshot.width = width;
+      domSnapshots.push(domSnapshot);
+    }
+  } finally {
+    await changeViewportAndWait(page, currentWidth, currentHeight, resizeCount + 1);
+  }
+  return domSnapshots;
+}
+
+async function captureDOM(page, options, percyDOM) {
+  const responsiveSnapshotCapture = isResponsiveDOMCaptureValid(options);
+  if (responsiveSnapshotCapture) {
+    return await captureResponsiveDOM(page, options, percyDOM);
+  } else {
+    return await captureSerializedDOM(page, options, percyDOM);
+  }
 }
 
 // Take a DOM snapshot and post it to the snapshot endpoint
@@ -58,57 +194,7 @@ const percySnapshot = async function(page, name, options) {
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
 
-    // Serialize and capture the DOM
-    /* istanbul ignore next: no instrumenting injected code */
-    let domSnapshot = await page.evaluate((options) => {
-      /* eslint-disable-next-line no-undef */
-      return PercyDOM.serialize(options);
-    }, options);
-
-    // Process CORS IFrames
-    // Note: Blob URL handling (data-src images, blob background images) is now handled
-    // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
-    // This section only handles cross-origin iframe serialization and resource merging.
-    const pageUrl = new URL(page.url());
-    const crossOriginFrames = page.frames()
-      .filter(frame => {
-        const frameUrl = frame.url();
-        if (!frameUrl || frameUrl === 'about:blank') return false;
-        try {
-          return new URL(frameUrl).origin !== pageUrl.origin;
-        } catch {
-          return false;
-        }
-      });
-
-    // Inject Percy DOM into all cross-origin frames before processing them in parallel
-    await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
-
-    const processedFrames = await Promise.all(
-      crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM))
-    );
-
-    for (const { iframeData, iframeResource, iframeSnapshot, frameUrl } of processedFrames) {
-      // Add the iframe's own resources to the main snapshot
-      domSnapshot.resources.push(...iframeSnapshot.resources);
-      // Add the iframe HTML resource itself
-      domSnapshot.resources.push(iframeResource);
-
-      if (iframeData && iframeData.percyElementId) {
-        const regex = new RegExp(`(<iframe[^>]*data-percy-element-id=["']${iframeData.percyElementId}["'][^>]*>)`);
-        const match = domSnapshot.html.match(regex);
-
-        /* istanbul ignore next: iframe matching logic depends on DOM structure */
-        if (match) {
-          const iframeTag = match[1];
-          // Replace the original iframe tag with one that points to the new resource.
-          const newIframeTag = iframeTag.replace(/src="[^"]*"/i, `src="${frameUrl}"`);
-          domSnapshot.html = domSnapshot.html.replace(iframeTag, newIframeTag);
-        }
-      }
-    }
-
-    domSnapshot.cookies = await page.context().cookies();
+    let domSnapshot = await captureDOM(page, options || {}, percyDOM);
 
     // Post the DOM to the snapshot endpoint with snapshot options and other info
     const response = await utils.postSnapshot({
