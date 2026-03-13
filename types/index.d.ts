@@ -7,7 +7,13 @@ export default function percySnapshot(
   options?: SnapshotOptions
 ): Promise<void>;
 
-export default function percyScreenshot(
+export function percyScreenshot(
+  page: Playwright.Page,
+  name: string,
+  options?: SnapshotOptions
+): Promise<void>;
+
+export function percySnapshot(
   page: Playwright.Page,
   name: string,
   options?: SnapshotOptions
