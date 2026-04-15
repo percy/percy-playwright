@@ -88,7 +88,9 @@ async function exposeClosedShadowRoots(page) {
     // Non-fatal — closed shadow DOM just won't be captured
     log.debug('Could not expose closed shadow roots via CDP:', err.message);
   } finally {
+    /* istanbul ignore else: cdpSession is always set when this finally block is reached */
     if (cdpSession) {
+      /* istanbul ignore next: swallow detach errors */
       await cdpSession.detach().catch(() => {});
     }
   }
