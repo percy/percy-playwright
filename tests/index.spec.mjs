@@ -729,6 +729,9 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot non-Chromium');
 
+    // Verify no errors were logged (exposeClosedShadowRoots should not throw)
+    expect(helpers.logger.stderr).toEqual([]);
+
     const logs = await helpers.get('logs');
     expect(logs).toEqual(expect.arrayContaining([
       'Snapshot found: Snapshot non-Chromium'
@@ -769,6 +772,10 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
+  // Note: These tests validate CDP method calls but not the actual feature contract
+  // (that closed shadow root content appears in serialized DOM output). A future
+  // integration test with a real closed shadow root fixture would catch regressions
+  // in the end-to-end feature.
   test('exposeClosedShadowRoots: closed shadow roots found and exposed via CDP', async ({ page }) => {
     const mockCDPSession = {
       send: sinon.stub(),

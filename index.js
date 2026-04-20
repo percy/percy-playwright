@@ -16,8 +16,9 @@ async function exposeClosedShadowRoots(page) {
   let cdpSession;
   try {
     cdpSession = await page.context().newCDPSession(page);
-  } catch {
-    // Not a Chromium browser (Firefox/WebKit) — skip silently
+  } catch (err) {
+    // Non-Chromium browser (Firefox/WebKit) or CDP session unavailable
+    log.debug('CDP session unavailable:', err.message);
     return;
   }
 
@@ -33,6 +34,9 @@ async function exposeClosedShadowRoots(page) {
     // Walk the CDP DOM tree to find closed shadow roots
     const closedPairs = [];
     function walkNodes(node) {
+      // Skip nodes inside child frame documents — cross-frame closed shadow
+      // roots are not yet supported (their execution context lacks the WeakMap)
+      if (node.contentDocument) return;
       if (node.shadowRoots) {
         for (const sr of node.shadowRoots) {
           if (sr.shadowRootType === 'closed') {
@@ -53,7 +57,6 @@ async function exposeClosedShadowRoots(page) {
     walkNodes(root);
 
     if (closedPairs.length === 0) {
-      await cdpSession.send('DOM.disable');
       return;
     }
 
@@ -65,9 +68,8 @@ async function exposeClosedShadowRoots(page) {
       window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap();
     });
 
-    // For each pair, resolve both host element and shadow root to JS objects,
-    // then store the mapping in the WeakMap
-    for (const pair of closedPairs) {
+    // Parallelize CDP roundtrips — CDP handles concurrent requests on a single session
+    await Promise.all(closedPairs.map(async (pair) => {
       const { object: hostObj } = await cdpSession.send('DOM.resolveNode', {
         backendNodeId: pair.hostBackendNodeId
       });
@@ -75,15 +77,16 @@ async function exposeClosedShadowRoots(page) {
         backendNodeId: pair.shadowBackendNodeId
       });
 
+      // Runtime.callFunctionOn without explicit executionContextId uses the context
+      // of the passed objectId (main world via DOM.resolveNode), which matches where
+      // page.evaluate runs — this is load-bearing for the WeakMap lookup
       /* istanbul ignore next: CDP-injected function */
       await cdpSession.send('Runtime.callFunctionOn', {
         functionDeclaration: 'function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }',
         objectId: hostObj.objectId,
         arguments: [{ objectId: shadowObj.objectId }]
       });
-    }
-
-    await cdpSession.send('DOM.disable');
+    }));
   } catch (err) {
     // Non-fatal — closed shadow DOM just won't be captured
     log.debug('Could not expose closed shadow roots via CDP:', err.message);
