@@ -761,7 +761,7 @@ test.describe('percySnapshot', () => {
     await percySnapshot(page, 'Snapshot no closed shadows');
 
     expect(mockCDPSession.send.calledWith('DOM.enable')).toBe(true);
-    expect(mockCDPSession.send.calledWith('DOM.disable')).toBe(true);
+    // DOM.disable is no longer called — session detach handles cleanup
     expect(mockCDPSession.detach.called).toBe(true);
     // Runtime.callFunctionOn should NOT have been called since no closed roots
     expect(mockCDPSession.send.calledWith('Runtime.callFunctionOn', sinon.match.any)).toBe(false);
@@ -816,7 +816,7 @@ test.describe('percySnapshot', () => {
       objectId: 'host-obj-1',
       arguments: [{ objectId: 'shadow-obj-1' }]
     }))).toBe(true);
-    expect(mockCDPSession.send.calledWith('DOM.disable')).toBe(true);
+    // DOM.disable is no longer called — session detach handles cleanup
     expect(mockCDPSession.detach.called).toBe(true);
 
     const logs = await helpers.get('logs');
