@@ -155,10 +155,17 @@ async function processFrame(page, frame, options, percyDOM) {
   const parentFrame = (frame.parentFrame && frame.parentFrame())
     || (page.mainFrame && page.mainFrame())
     || page;
+  // Match by exact src first; fall back to a normalized comparison that
+  // tolerates only a trailing-slash difference. A naive `startsWith` would
+  // mis-match siblings that share a URL prefix (e.g. `https://ads.com/` and
+  // `https://ads.com/banner`).
   /* istanbul ignore next: browser-executed evaluation function */
   const iframeData = await parentFrame.evaluate((fUrl) => {
+    const norm = (s) => (s || '').replace(/\/+$/, '');
+    const target = norm(fUrl);
     const iframes = Array.from(document.querySelectorAll('iframe'));
-    const matchingIframe = iframes.find(iframe => iframe.src === fUrl || iframe.src.startsWith(fUrl));
+    const matchingIframe = iframes.find(iframe => iframe.src === fUrl) ||
+      iframes.find(iframe => norm(iframe.src) === target);
     if (matchingIframe) {
       return {
         percyElementId: matchingIframe.getAttribute('data-percy-element-id')
