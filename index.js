@@ -99,9 +99,43 @@ async function exposeClosedShadowRoots(page) {
   }
 }
 
+const MAX_FRAME_DEPTH = 10;
+
+const UNSUPPORTED_IFRAME_SRCS = [
+  'about:blank',
+  'about:srcdoc',
+  'javascript:',
+  'data:',
+  'blob:',
+  'vbscript:',
+  'chrome:',
+  'chrome-extension:'
+];
+
+function isUnsupportedIframeSrc(src) {
+  if (!src) return true;
+  return UNSUPPORTED_IFRAME_SRCS.some(prefix => src === prefix || src.startsWith(prefix));
+}
+
+// Walk the parentFrame chain to determine the iframe's nesting depth (1 for a
+// top-level iframe, 2 for once-nested, ...). Returns 0 for the main frame.
+function frameDepth(frame) {
+  let depth = 0;
+  let cur = frame.parentFrame ? frame.parentFrame() : null;
+  while (cur) {
+    depth++;
+    cur = cur.parentFrame ? cur.parentFrame() : null;
+  }
+  return depth;
+}
+
 // Processes a single cross-origin frame to capture its snapshot and resources.
+// The iframe element holding this frame's percyElementId lives in the parent
+// frame's DOM (not necessarily the top page) — important for nesting where the
+// parent is itself a cross-origin frame.
 async function processFrame(page, frame, options, percyDOM) {
   const frameUrl = frame.url();
+  log.debug(`Processing cross-origin iframe (depth ${frameDepth(frame)}): ${frameUrl}`);
 
   /* istanbul ignore next: browser-executed iframe serialization */
   // enableJavaScript: true prevents the standard iframe serialization logic from running.
@@ -109,13 +143,22 @@ async function processFrame(page, frame, options, percyDOM) {
   const iframeSnapshot = await frame.evaluate((opts) => {
     /* eslint-disable-next-line no-undef */
     return PercyDOM.serialize(opts);
-  }, { ...options, enableJavascript: true });
+  }, { ...options, enableJavaScript: true });
 
-  // Get the iframe's element data from the main page context
+  // Look up the iframe element in the *parent frame's* DOM. For top-level
+  // iframes the parent is the main frame; for nested iframes it's the
+  // immediately enclosing frame. Reading from the top page would miss nested
+  // iframes whose <iframe> element lives inside another frame's document.
+  // Falls back to `page` if neither is available (e.g. minimal test stubs)
+  // — page.evaluate has the same signature so the lookup still works for
+  // top-level iframes.
+  const parentFrame = (frame.parentFrame && frame.parentFrame())
+    || (page.mainFrame && page.mainFrame())
+    || page;
   /* istanbul ignore next: browser-executed evaluation function */
-  const iframeData = await page.evaluate((fUrl) => {
+  const iframeData = await parentFrame.evaluate((fUrl) => {
     const iframes = Array.from(document.querySelectorAll('iframe'));
-    const matchingIframe = iframes.find(iframe => iframe.src.startsWith(fUrl));
+    const matchingIframe = iframes.find(iframe => iframe.src === fUrl || iframe.src.startsWith(fUrl));
     if (matchingIframe) {
       return {
         percyElementId: matchingIframe.getAttribute('data-percy-element-id')
@@ -137,17 +180,29 @@ async function captureSerializedDOM(page, options, percyDOM) {
     return PercyDOM.serialize(options);
   }, options);
 
-  // Process CORS IFrames
-  // Note: Blob URL handling (data-src images, blob background images) is now handled
-  // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
-  // This section only handles cross-origin iframe serialization and resource merging.
-  const pageUrl = new URL(page.url());
-  const crossOriginFrames = page.frames()
+  // Process CORS IFrames (including nested cross-origin iframes up to
+  // MAX_FRAME_DEPTH). page.frames() returns a flat list of every frame on the
+  // page tree, so descendants are already included; filter to non-main frames
+  // whose origin differs from their *immediate parent* (same-origin descendants
+  // are inlined as srcdoc by PercyDOM).
+  const allFrames = page.frames();
+  const mainFrame = (page.mainFrame && page.mainFrame()) || allFrames[0];
+  const crossOriginFrames = allFrames
     .filter(frame => {
+      if (frame === mainFrame) return false;
       const frameUrl = frame.url();
-      if (!frameUrl || frameUrl === 'about:blank') return false;
+      if (!frameUrl || isUnsupportedIframeSrc(frameUrl)) return false;
+      const depth = frameDepth(frame);
+      if (depth > MAX_FRAME_DEPTH) {
+        log.debug(`Skipping iframe at depth ${depth} (max ${MAX_FRAME_DEPTH}): ${frameUrl}`);
+        return false;
+      }
       try {
-        return new URL(frameUrl).origin !== pageUrl.origin;
+        const parent = frame.parentFrame && frame.parentFrame();
+        const parentUrl = (parent && parent.url && parent.url()) || page.url();
+        const parentOrigin = parentUrl ? new URL(parentUrl).origin : null;
+        const frameOrigin = new URL(frameUrl).origin;
+        return parentOrigin !== null && frameOrigin !== parentOrigin;
       } catch {
         return false;
       }
