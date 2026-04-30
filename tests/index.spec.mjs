@@ -786,6 +786,27 @@ test.describe('percySnapshot', () => {
         '[percy] Could not take DOM snapshot "readiness-reject"'
       ]));
     });
+
+    test('attaches diagnostics returned by waitForReady to domSnapshot', async ({ page }) => {
+      // Stub page.evaluate to return synthetic diagnostics for waitForReady
+      // and a known domSnapshot object for serialize. The SDK mutates the
+      // domSnapshot in place — same pattern as the cookies test at line 57.
+      const diagnostics = { passed: true, timed_out: false, preset: 'balanced', total_duration_ms: 84, checks: {} };
+      const domSnapshot = { html: '<html></html>' };
+      sinon.stub(page, 'evaluate').callsFake((fn, ...rest) => {
+        if (typeof fn === 'function' && fn.toString().includes('waitForReady')) {
+          return Promise.resolve(diagnostics);
+        }
+        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) {
+          return Promise.resolve(domSnapshot);
+        }
+        return Promise.resolve();
+      });
+
+      await percySnapshot(page, 'readiness-diagnostics');
+
+      expect(domSnapshot.readiness_diagnostics).toEqual(diagnostics);
+    });
   });
 });
 
