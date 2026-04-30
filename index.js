@@ -40,11 +40,34 @@ async function processFrame(page, frame, options, percyDOM) {
 }
 
 async function captureSerializedDOM(page, options, percyDOM) {
+  // Readiness gate — runs before serialize when CLI supports it (PER-7348).
+  // Uses typeof guard for backward compat with older CLI that lacks waitForReady.
+  // Diagnostics are captured and attached to domSnapshot so the CLI can log them.
+  let readinessDiagnostics;
+  const readinessConfig = options.readiness || utils.percy?.config?.snapshot?.readiness || {};
+  if (readinessConfig.preset !== 'disabled') {
+    /* istanbul ignore next: no instrumenting injected code */
+    readinessDiagnostics = await page.evaluate((cfg) => {
+      /* eslint-disable-next-line no-undef */
+      if (typeof PercyDOM !== 'undefined' && typeof PercyDOM.waitForReady === 'function') {
+        /* eslint-disable-next-line no-undef */
+        return PercyDOM.waitForReady(cfg);
+      }
+    }, readinessConfig).catch(err => {
+      log.debug(`waitForReady failed, proceeding to serialize: ${err?.message || err}`);
+    });
+  }
+
   /* istanbul ignore next: no instrumenting injected code */
   let domSnapshot = await page.evaluate((options) => {
     /* eslint-disable-next-line no-undef */
     return PercyDOM.serialize(options);
   }, options);
+
+  // Attach readiness diagnostics so the CLI can log timing and pass/fail
+  if (readinessDiagnostics) {
+    domSnapshot.readiness_diagnostics = readinessDiagnostics;
+  }
 
   // Process CORS IFrames
   // Note: Blob URL handling (data-src images, blob background images) is now handled

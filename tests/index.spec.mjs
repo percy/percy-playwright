@@ -721,6 +721,93 @@ test.describe('percySnapshot', () => {
     expect(width360Calls.length).toBe(1);
     expect(width360Calls[0].args[0].height).toBe(670);
   });
+
+  test.describe('readiness gate (PER-7348)', () => {
+    // The SDK-level readiness call uses page.evaluate with a function whose
+    // source contains "waitForReady". Match by stringifying the evaluator.
+    const isReadinessEval = (call) => {
+      const fn = call.args[0];
+      return typeof fn === 'function' && fn.toString().includes('waitForReady');
+    };
+    const isSerializeEval = (call) => {
+      const fn = call.args[0];
+      return typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize');
+    };
+
+    test('runs waitForReady before serialize by default', async ({ page }) => {
+      const evalSpy = sinon.spy(page, 'evaluate');
+
+      await percySnapshot(page, 'readiness-happy-path');
+
+      const calls = evalSpy.getCalls();
+      const readinessIdx = calls.findIndex(isReadinessEval);
+      const serializeIdx = calls.findIndex(isSerializeEval);
+      expect(readinessIdx).toBeGreaterThanOrEqual(0);
+      expect(serializeIdx).toBeGreaterThanOrEqual(0);
+      expect(readinessIdx).toBeLessThan(serializeIdx);
+    });
+
+    test('passes readiness config from snapshot options through to waitForReady', async ({ page }) => {
+      const evalSpy = sinon.spy(page, 'evaluate');
+      const readiness = { preset: 'strict', stabilityWindowMs: 500 };
+
+      await percySnapshot(page, 'readiness-with-config', { readiness });
+
+      const readinessCall = evalSpy.getCalls().find(isReadinessEval);
+      expect(readinessCall).toBeDefined();
+      expect(readinessCall.args[1]).toEqual(readiness);
+    });
+
+    test('skips waitForReady when preset is disabled', async ({ page }) => {
+      const evalSpy = sinon.spy(page, 'evaluate');
+
+      await percySnapshot(page, 'readiness-disabled', { readiness: { preset: 'disabled' } });
+
+      const readinessCall = evalSpy.getCalls().find(isReadinessEval);
+      expect(readinessCall).toBeUndefined();
+      // serialize should still run
+      expect(evalSpy.getCalls().find(isSerializeEval)).toBeDefined();
+    });
+
+    test('still runs serialize when waitForReady throws', async ({ page }) => {
+      // Make every page.evaluate that hits waitForReady reject; other evaluates pass through.
+      const origEvaluate = page.evaluate.bind(page);
+      sinon.stub(page, 'evaluate').callsFake((fn, ...rest) => {
+        if (typeof fn === 'function' && fn.toString().includes('waitForReady')) {
+          return Promise.reject(new Error('readiness boom'));
+        }
+        return origEvaluate(fn, ...rest);
+      });
+
+      await percySnapshot(page, 'readiness-reject');
+
+      // If serialize ran, the snapshot gets posted — assert no top-level SDK error was logged.
+      expect(helpers.logger.stderr).not.toEqual(expect.arrayContaining([
+        '[percy] Could not take DOM snapshot "readiness-reject"'
+      ]));
+    });
+
+    test('attaches diagnostics returned by waitForReady to domSnapshot', async ({ page }) => {
+      // Stub page.evaluate to return synthetic diagnostics for waitForReady
+      // and a known domSnapshot object for serialize. The SDK mutates the
+      // domSnapshot in place — same pattern as the cookies test at line 57.
+      const diagnostics = { passed: true, timed_out: false, preset: 'balanced', total_duration_ms: 84, checks: {} };
+      const domSnapshot = { html: '<html></html>' };
+      sinon.stub(page, 'evaluate').callsFake((fn, ...rest) => {
+        if (typeof fn === 'function' && fn.toString().includes('waitForReady')) {
+          return Promise.resolve(diagnostics);
+        }
+        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) {
+          return Promise.resolve(domSnapshot);
+        }
+        return Promise.resolve();
+      });
+
+      await percySnapshot(page, 'readiness-diagnostics');
+
+      expect(domSnapshot.readiness_diagnostics).toEqual(diagnostics);
+    });
+  });
 });
 
 test.describe('percyScreenshot', () => {
