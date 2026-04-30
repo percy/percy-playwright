@@ -99,7 +99,20 @@ async function exposeClosedShadowRoots(page) {
   }
 }
 
-const MAX_FRAME_DEPTH = 10;
+const DEFAULT_MAX_FRAME_DEPTH = 10;
+const HARD_MAX_FRAME_DEPTH = 25;
+
+function resolveMaxFrameDepth(options = {}) {
+  const raw = options.maxIframeDepth ?? DEFAULT_MAX_FRAME_DEPTH;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_FRAME_DEPTH;
+  return Math.min(n, HARD_MAX_FRAME_DEPTH);
+}
+
+function resolveIgnoreSelectors(options = {}) {
+  const list = options.ignoreIframeSelectors ?? [];
+  return Array.isArray(list) ? list.filter(s => typeof s === 'string' && s.trim()) : [];
+}
 
 const UNSUPPORTED_IFRAME_SRCS = [
   'about:blank',
@@ -202,20 +215,60 @@ async function captureSerializedDOM(page, options, percyDOM) {
   }, options);
 
   // Process CORS IFrames (including nested cross-origin iframes up to
-  // MAX_FRAME_DEPTH). page.frames() returns a flat list of every frame on the
+  // maxIframeDepth). page.frames() returns a flat list of every frame on the
   // page tree, so descendants are already included; filter to non-main frames
   // whose origin differs from their *immediate parent* (same-origin descendants
   // are inlined as srcdoc by PercyDOM).
+  const maxFrameDepth = resolveMaxFrameDepth(options);
+  const ignoreSelectors = resolveIgnoreSelectors(options);
   const allFrames = page.frames();
   const mainFrame = (page.mainFrame && page.mainFrame()) || allFrames[0];
+
+  // Resolve per-frame `data-percy-ignore` and ignoreIframeSelectors flags
+  // from the parent frame's DOM (where the <iframe> element lives).
+  const ignoreFlagsByFrame = new Map();
+  await Promise.all(allFrames.map(async (frame) => {
+    if (frame === mainFrame) return;
+    try {
+      const parent = (frame.parentFrame && frame.parentFrame()) || mainFrame;
+      const flags = await parent.evaluate(({ fUrl, selectors }) => {
+        const norm = (s) => (s || '').replace(/\/+$/, '');
+        const target = norm(fUrl);
+        const iframes = Array.from(document.querySelectorAll('iframe'));
+        const el = iframes.find(i => i.src === fUrl) || iframes.find(i => norm(i.src) === target);
+        if (!el) return { dataPercyIgnore: false, matchesIgnoreSelector: false };
+        let matches = false;
+        if (selectors && selectors.length) {
+          for (let j = 0; j < selectors.length; j++) {
+            try { if (el.matches(selectors[j])) { matches = true; break; } } catch (e) { /* invalid */ }
+          }
+        }
+        return {
+          dataPercyIgnore: el.hasAttribute('data-percy-ignore'),
+          matchesIgnoreSelector: matches
+        };
+      }, { fUrl: frame.url(), selectors: ignoreSelectors });
+      ignoreFlagsByFrame.set(frame, flags);
+    } catch (e) { /* leave entry absent */ }
+  }));
+
   const crossOriginFrames = allFrames
     .filter(frame => {
       if (frame === mainFrame) return false;
+      const flags = ignoreFlagsByFrame.get(frame) || {};
+      if (flags.dataPercyIgnore) {
+        log.debug(`Skipping iframe marked with data-percy-ignore: ${frame.url()}`);
+        return false;
+      }
+      if (flags.matchesIgnoreSelector) {
+        log.debug(`Skipping iframe matching ignoreIframeSelectors: ${frame.url()}`);
+        return false;
+      }
       const frameUrl = frame.url();
       if (!frameUrl || isUnsupportedIframeSrc(frameUrl)) return false;
       const depth = frameDepth(frame);
-      if (depth > MAX_FRAME_DEPTH) {
-        log.debug(`Skipping iframe at depth ${depth} (max ${MAX_FRAME_DEPTH}): ${frameUrl}`);
+      if (depth > maxFrameDepth) {
+        log.debug(`Skipping iframe at depth ${depth} (max ${maxFrameDepth}): ${frameUrl}`);
         return false;
       }
       if (isCyclicFrame(frame)) {
