@@ -1,4 +1,5 @@
 import helpers from '@percy/sdk-utils/test/helpers';
+import utils from '@percy/sdk-utils';
 import { test, expect } from '@playwright/test';
 import percySnapshot from '../index.js';
 import sinon from 'sinon';
@@ -31,6 +32,22 @@ test.describe('percySnapshot', () => {
 
     expect(helpers.logger.stdout).toEqual(expect.arrayContaining([
       '[percy] Percy is not running, disabling snapshots'
+    ]));
+  });
+
+  test('posts snapshots when config.snapshot is undefined', async ({ page }) => {
+    await percySnapshot(page, 'Snapshot 1');
+
+    const savedConfig = utils.percy.config;
+    utils.percy.config = { ...savedConfig, snapshot: undefined };
+
+    await percySnapshot(page, 'Snapshot without config');
+
+    utils.percy.config = savedConfig;
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot without config'
     ]));
   });
 

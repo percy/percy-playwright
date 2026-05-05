@@ -130,7 +130,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   if (!utils.getResponsiveWidths) {
     throw new Error('Update Percy CLI to the latest version to use responsiveSnapshotCapture');
   }
-  const widthHeights = await utils.getResponsiveWidths(options.widths || []);
+  const widthHeights = await utils.getResponsiveWidths(options.widths);
 
   try {
     for (let { width, height } of widthHeights) {
@@ -186,7 +186,6 @@ const percySnapshot = async function(page, name, options) {
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
 
-    /* istanbul ignore next: config is always populated after isPercyEnabled */
     const configOptions = utils.percy?.config?.snapshot || {};
     const mergedOptions = { ...configOptions, ...options };
     let domSnapshot = await captureDOM(page, mergedOptions, percyDOM);
