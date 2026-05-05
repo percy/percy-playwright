@@ -1,5 +1,10 @@
 const utils = require('@percy/sdk-utils');
 const { Utils } = require('./utils');
+const {
+  resolveMaxFrameDepth,
+  resolveIgnoreSelectors,
+  isUnsupportedIframeSrc
+} = require('./iframe-utils');
 
 // Collect client and environment information
 const sdkPkg = require('./package.json');
@@ -99,37 +104,6 @@ async function exposeClosedShadowRoots(page) {
   }
 }
 
-const DEFAULT_MAX_FRAME_DEPTH = 10;
-const HARD_MAX_FRAME_DEPTH = 25;
-
-function resolveMaxFrameDepth(options = {}) {
-  const raw = options.maxIframeDepth ?? DEFAULT_MAX_FRAME_DEPTH;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_FRAME_DEPTH;
-  return Math.min(n, HARD_MAX_FRAME_DEPTH);
-}
-
-function resolveIgnoreSelectors(options = {}) {
-  const list = options.ignoreIframeSelectors ?? [];
-  return Array.isArray(list) ? list.filter(s => typeof s === 'string' && s.trim()) : [];
-}
-
-const UNSUPPORTED_IFRAME_SRCS = [
-  'about:blank',
-  'about:srcdoc',
-  'javascript:',
-  'data:',
-  'blob:',
-  'vbscript:',
-  'chrome:',
-  'chrome-extension:'
-];
-
-function isUnsupportedIframeSrc(src) {
-  if (!src) return true;
-  return UNSUPPORTED_IFRAME_SRCS.some(prefix => src === prefix || src.startsWith(prefix));
-}
-
 // Walk the parentFrame chain to determine the iframe's nesting depth (1 for a
 // top-level iframe, 2 for once-nested, ...). Returns 0 for the main frame.
 function frameDepth(frame) {
@@ -179,9 +153,9 @@ async function processFrame(page, frame, options, percyDOM) {
   // Falls back to `page` if neither is available (e.g. minimal test stubs)
   // — page.evaluate has the same signature so the lookup still works for
   // top-level iframes.
-  const parentFrame = (frame.parentFrame && frame.parentFrame())
-    || (page.mainFrame && page.mainFrame())
-    || page;
+  const parentFrame = (frame.parentFrame && frame.parentFrame()) ||
+    (page.mainFrame && page.mainFrame()) ||
+    page;
   // Match by exact src first; fall back to a normalized comparison that
   // tolerates only a trailing-slash difference. A naive `startsWith` would
   // mis-match siblings that share a URL prefix (e.g. `https://ads.com/` and
@@ -376,6 +350,9 @@ async function captureResponsiveDOM(page, options, percyDOM) {
       if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE?.toLowerCase() === 'true') {
         await page.reload();
         await page.evaluate(percyDOM);
+        // Re-prime closed shadow root WeakMap — page.reload() creates a new
+        // document and discards the previous window-bound state.
+        await exposeClosedShadowRoots(page);
         /* istanbul ignore next: no instrumenting injected code */
         await page.evaluate(() => {
           /* eslint-disable-next-line no-undef */
