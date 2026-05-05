@@ -121,10 +121,8 @@ async function captureResponsiveDOM(page, options, percyDOM) {
 
   // Calculate default height for non-mobile widths
   let defaultHeight = currentHeight;
-  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true') {
-    if (options.minHeight) {
-      defaultHeight = options.minHeight;
-    }
+  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true' && options.minHeight) {
+    defaultHeight = options.minHeight;
   }
 
   // Get width and height combinations
@@ -188,6 +186,7 @@ const percySnapshot = async function(page, name, options) {
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
 
+    /* istanbul ignore next: config is always populated after isPercyEnabled */
     const configOptions = utils.percy?.config?.snapshot || {};
     const mergedOptions = { ...configOptions, ...options };
     let domSnapshot = await captureDOM(page, mergedOptions, percyDOM);
