@@ -205,6 +205,7 @@ async function captureSerializedDOM(page, options, percyDOM) {
     if (frame === mainFrame) return;
     try {
       const parent = (frame.parentFrame && frame.parentFrame()) || mainFrame;
+      /* istanbul ignore next: browser-executed evaluate callback */
       const flags = await parent.evaluate(({ fUrl, selectors }) => {
         const norm = (s) => (s || '').replace(/\/+$/, '');
         const target = norm(fUrl);
