@@ -186,8 +186,7 @@ const percySnapshot = async function(page, name, options) {
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
 
-    const configOptions = utils.percy?.config?.snapshot || {};
-    const mergedOptions = { ...configOptions, ...options };
+    const mergedOptions = utils.mergeSnapshotOptions(options);
     let domSnapshot = await captureDOM(page, mergedOptions, percyDOM);
 
     // Post the DOM to the snapshot endpoint with snapshot options and other info
