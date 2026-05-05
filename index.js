@@ -508,3 +508,7 @@ module.exports.createRegion = createRegion;
 module.exports.percyScreenshot = percyScreenshot;
 module.exports.CLIENT_INFO = CLIENT_INFO;
 module.exports.ENV_INFO = ENV_INFO;
+// Exported for direct unit testing of the parentFrame-chain walkers.
+module.exports.frameDepth = frameDepth;
+module.exports.isCyclicFrame = isCyclicFrame;
+module.exports.captureSerializedDOM = captureSerializedDOM;

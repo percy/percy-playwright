@@ -10,7 +10,7 @@ import {
 
 test.describe('iframe-utils', () => {
   test('UNSUPPORTED_IFRAME_SRCS list', () => {
-    expect(UNSUPPORTED_IFRAME_SRCS).toContain('about:blank');
+    expect(UNSUPPORTED_IFRAME_SRCS).toContain('about:');
     expect(UNSUPPORTED_IFRAME_SRCS).toContain('javascript:');
     expect(UNSUPPORTED_IFRAME_SRCS).toContain('data:');
   });
