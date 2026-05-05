@@ -148,6 +148,102 @@ test.describe('captureSerializedDOM filter branches', () => {
     expect(called).toBe(false);
   });
 
+  test('processes cross-origin frame with percy-element-id (covers processFrame)', async () => {
+    const page = buildMockPage({
+      pageUrl: 'https://example.com/',
+      frames: [{
+        url: 'https://other.com/embed',
+        percyElementId: 'percy-iframe-1',
+        snapshot: { html: '<html><body>cross-origin</body></html>', resources: [], warnings: [] }
+      }]
+    });
+
+    const result = await captureSerializedDOM(page, {}, '');
+    expect(result.corsIframes).toBeDefined();
+    expect(result.corsIframes.length).toBe(1);
+  });
+
+  test('processFrame uses page fallback when neither frame.parentFrame nor page.mainFrame yield a frame', async () => {
+    // Real mainFrame at index 0; a sibling cross-origin frame with NO parentFrame method
+    // and a page where mainFrame() returns null. processFrame's parent lookup must
+    // fall through both ORs and end up using `page` directly.
+    const realMainFrame = {
+      url: () => 'https://example.com/',
+      parentFrame: () => null,
+      evaluate: async (fn, ...args) => {
+        const fnStr = fn.toString();
+        if (fnStr.includes('querySelectorAll')) {
+          // Flag lookup: return empty flags so the filter falls through
+          if (args && args[0]?.fUrl !== undefined) {
+            return { dataPercyIgnore: false, matchesIgnoreSelector: false };
+          }
+          // percyElementId lookup
+          return { percyElementId: 'percy-id-orphan' };
+        }
+        return undefined;
+      }
+    };
+    const orphanFrame = {
+      url: () => 'https://orphan.com/',
+      // NO parentFrame method
+      evaluate: async (fn) => {
+        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) {
+          return { html: '<html><body>orphan</body></html>', resources: [], warnings: [] };
+        }
+        return undefined;
+      }
+    };
+    const minimalPage = {
+      url: () => 'https://example.com/',
+      mainFrame: () => null, // Falsy — forces fallback in processFrame
+      evaluate: async (fn) => {
+        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) {
+          return { html: '<html></html>', resources: [], warnings: [] };
+        }
+        // page acts as the parent frame for the orphan; respond like mainFrame would
+        const fnStr = fn.toString();
+        if (fnStr.includes('querySelectorAll')) {
+          return { percyElementId: 'percy-id-orphan' };
+        }
+        return undefined;
+      },
+      frames: () => [realMainFrame, orphanFrame],
+      context: () => ({ cookies: async () => [] })
+    };
+
+    const result = await captureSerializedDOM(minimalPage, {}, '');
+    expect(result.corsIframes).toBeDefined();
+  });
+
+  test('handles empty parent.url() and empty page.url() (parentUrl falsy branch)', async () => {
+    const realMainFrame = {
+      url: () => '',
+      parentFrame: () => null,
+      evaluate: async () => ({ dataPercyIgnore: false, matchesIgnoreSelector: false })
+    };
+    const childFrame = {
+      url: () => 'https://other.com/',
+      // parent.url() returns ''
+      parentFrame: () => ({ url: () => '' }),
+      evaluate: async () => undefined
+    };
+    const emptyUrlPage = {
+      url: () => '',
+      mainFrame: () => realMainFrame,
+      evaluate: async (fn) => {
+        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) {
+          return { html: '<html></html>', resources: [], warnings: [] };
+        }
+        return undefined;
+      },
+      frames: () => [realMainFrame, childFrame],
+      context: () => ({ cookies: async () => [] })
+    };
+
+    // parentUrl resolves to '' — origin check returns false, frame skipped.
+    await captureSerializedDOM(emptyUrlPage, {}, '');
+  });
+
   test('skips cyclic frames', async () => {
     const root = { url: () => 'https://root.com/' };
     const ancestorA = { url: () => 'https://a.com/', parentFrame: () => root };
