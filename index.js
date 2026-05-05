@@ -124,12 +124,6 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true') {
     if (options.minHeight) {
       defaultHeight = options.minHeight;
-    } else {
-      const configMinHeight = utils.percy?.config?.snapshot?.minHeight;
-      /* istanbul ignore else: CLI always provides default value for config.snapshot */
-      if (configMinHeight) {
-        defaultHeight = configMinHeight;
-      }
     }
   }
 
