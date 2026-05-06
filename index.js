@@ -4,7 +4,7 @@ const {
   resolveMaxFrameDepth,
   resolveIgnoreSelectors,
   isUnsupportedIframeSrc
-} = require('./iframe-utils');
+} = utils;
 
 // Collect client and environment information
 const sdkPkg = require('./package.json');
