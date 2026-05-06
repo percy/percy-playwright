@@ -1,5 +1,10 @@
 const utils = require('@percy/sdk-utils');
 const { Utils } = require('./utils');
+const {
+  resolveMaxFrameDepth,
+  resolveIgnoreSelectors,
+  isUnsupportedIframeSrc
+} = utils;
 
 // Collect client and environment information
 const sdkPkg = require('./package.json');
@@ -8,9 +13,130 @@ const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 const ENV_INFO = `${playwrightPkg.name}/${playwrightPkg.version}`;
 const log = utils.logger('playwright');
 
+// Use CDP to discover closed shadow roots and expose them to PercyDOM.serialize().
+// Closed shadow roots are inaccessible from JS (element.shadowRoot === null),
+// but CDP's DOM domain can pierce them. We resolve each closed shadow root to a
+// JS object and store it in a WeakMap that clone-dom.js reads during serialization.
+async function exposeClosedShadowRoots(page) {
+  let cdpSession;
+  try {
+    cdpSession = await page.context().newCDPSession(page);
+  } catch (err) {
+    // Non-Chromium browser (Firefox/WebKit) or CDP session unavailable
+    log.debug('CDP session unavailable:', err.message);
+    return;
+  }
+
+  try {
+    await cdpSession.send('DOM.enable');
+
+    // Get the full DOM tree, piercing all shadow roots including closed ones
+    const { root } = await cdpSession.send('DOM.getDocument', {
+      depth: -1,
+      pierce: true
+    });
+
+    // Walk the CDP DOM tree to find closed shadow roots
+    const closedPairs = [];
+    function walkNodes(node) {
+      // Skip nodes inside child frame documents — cross-frame closed shadow
+      // roots are not yet supported (their execution context lacks the WeakMap)
+      if (node.contentDocument) return;
+      if (node.shadowRoots) {
+        for (const sr of node.shadowRoots) {
+          if (sr.shadowRootType === 'closed') {
+            closedPairs.push({
+              hostBackendNodeId: node.backendNodeId,
+              shadowBackendNodeId: sr.backendNodeId
+            });
+          }
+          walkNodes(sr);
+        }
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          walkNodes(child);
+        }
+      }
+    }
+    walkNodes(root);
+
+    if (closedPairs.length === 0) {
+      return;
+    }
+
+    log.debug(`Found ${closedPairs.length} closed shadow root(s), exposing via CDP`);
+
+    // Create the WeakMap on the page (same key as preflight.js uses)
+    /* istanbul ignore next: browser-executed code */
+    await page.evaluate(() => {
+      window.__percyClosedShadowRoots = window.__percyClosedShadowRoots || new WeakMap();
+    });
+
+    // Parallelize CDP roundtrips — CDP handles concurrent requests on a single session
+    await Promise.all(closedPairs.map(async (pair) => {
+      const { object: hostObj } = await cdpSession.send('DOM.resolveNode', {
+        backendNodeId: pair.hostBackendNodeId
+      });
+      const { object: shadowObj } = await cdpSession.send('DOM.resolveNode', {
+        backendNodeId: pair.shadowBackendNodeId
+      });
+
+      // Runtime.callFunctionOn without explicit executionContextId uses the context
+      // of the passed objectId (main world via DOM.resolveNode), which matches where
+      // page.evaluate runs — this is load-bearing for the WeakMap lookup
+      /* istanbul ignore next: CDP-injected function */
+      await cdpSession.send('Runtime.callFunctionOn', {
+        functionDeclaration: 'function(shadowRoot) { window.__percyClosedShadowRoots.set(this, shadowRoot); }',
+        objectId: hostObj.objectId,
+        arguments: [{ objectId: shadowObj.objectId }]
+      });
+    }));
+  } catch (err) {
+    // Non-fatal — closed shadow DOM just won't be captured
+    log.debug('Could not expose closed shadow roots via CDP:', err.message);
+  } finally {
+    /* istanbul ignore else: cdpSession is always set when this finally block is reached */
+    if (cdpSession) {
+      /* istanbul ignore next: swallow detach errors */
+      await cdpSession.detach().catch(() => {});
+    }
+  }
+}
+
+// Walk the parentFrame chain to determine the iframe's nesting depth (1 for a
+// top-level iframe, 2 for once-nested, ...). Returns 0 for the main frame.
+function frameDepth(frame) {
+  let depth = 0;
+  let cur = frame.parentFrame ? frame.parentFrame() : null;
+  while (cur) {
+    depth++;
+    cur = cur.parentFrame ? cur.parentFrame() : null;
+  }
+  return depth;
+}
+
+// True if the frame's URL also appears somewhere in its ancestor chain.
+// Skipping cyclic frames prevents A->B->A pages from generating up to
+// MAX_FRAME_DEPTH duplicate corsIframes entries.
+function isCyclicFrame(frame) {
+  const url = frame.url ? frame.url() : null;
+  if (!url) return false;
+  let cur = frame.parentFrame ? frame.parentFrame() : null;
+  while (cur) {
+    if (cur.url && cur.url() === url) return true;
+    cur = cur.parentFrame ? cur.parentFrame() : null;
+  }
+  return false;
+}
+
 // Processes a single cross-origin frame to capture its snapshot and resources.
+// The iframe element holding this frame's percyElementId lives in the parent
+// frame's DOM (not necessarily the top page) — important for nesting where the
+// parent is itself a cross-origin frame.
 async function processFrame(page, frame, options, percyDOM) {
   const frameUrl = frame.url();
+  log.debug(`Processing cross-origin iframe (depth ${frameDepth(frame)}): ${frameUrl}`);
 
   /* istanbul ignore next: browser-executed iframe serialization */
   // enableJavaScript: true prevents the standard iframe serialization logic from running.
@@ -18,13 +144,29 @@ async function processFrame(page, frame, options, percyDOM) {
   const iframeSnapshot = await frame.evaluate((opts) => {
     /* eslint-disable-next-line no-undef */
     return PercyDOM.serialize(opts);
-  }, { ...options, enableJavascript: true });
+  }, { ...options, enableJavaScript: true });
 
-  // Get the iframe's element data from the main page context
+  // Look up the iframe element in the *parent frame's* DOM. For top-level
+  // iframes the parent is the main frame; for nested iframes it's the
+  // immediately enclosing frame. Reading from the top page would miss nested
+  // iframes whose <iframe> element lives inside another frame's document.
+  // Falls back to `page` if neither is available (e.g. minimal test stubs)
+  // — page.evaluate has the same signature so the lookup still works for
+  // top-level iframes.
+  const parentFrame = (frame.parentFrame && frame.parentFrame()) ||
+    (page.mainFrame && page.mainFrame()) ||
+    page;
+  // Match by exact src first; fall back to a normalized comparison that
+  // tolerates only a trailing-slash difference. A naive `startsWith` would
+  // mis-match siblings that share a URL prefix (e.g. `https://ads.com/` and
+  // `https://ads.com/banner`).
   /* istanbul ignore next: browser-executed evaluation function */
-  const iframeData = await page.evaluate((fUrl) => {
+  const iframeData = await parentFrame.evaluate((fUrl) => {
+    const norm = (s) => (s || '').replace(/\/+$/, '');
+    const target = norm(fUrl);
     const iframes = Array.from(document.querySelectorAll('iframe'));
-    const matchingIframe = iframes.find(iframe => iframe.src.startsWith(fUrl));
+    const matchingIframe = iframes.find(iframe => iframe.src === fUrl) ||
+      iframes.find(iframe => norm(iframe.src) === target);
     if (matchingIframe) {
       return {
         percyElementId: matchingIframe.getAttribute('data-percy-element-id')
@@ -46,17 +188,74 @@ async function captureSerializedDOM(page, options, percyDOM) {
     return PercyDOM.serialize(options);
   }, options);
 
-  // Process CORS IFrames
-  // Note: Blob URL handling (data-src images, blob background images) is now handled
-  // in the CLI via async DOM serialization. See: percy/cli packages/dom/src/serialize-blob-urls.js
-  // This section only handles cross-origin iframe serialization and resource merging.
-  const pageUrl = new URL(page.url());
-  const crossOriginFrames = page.frames()
+  // Process CORS IFrames (including nested cross-origin iframes up to
+  // maxIframeDepth). page.frames() returns a flat list of every frame on the
+  // page tree, so descendants are already included; filter to non-main frames
+  // whose origin differs from their *immediate parent* (same-origin descendants
+  // are inlined as srcdoc by PercyDOM).
+  const maxFrameDepth = resolveMaxFrameDepth(options);
+  const ignoreSelectors = resolveIgnoreSelectors(options);
+  const allFrames = page.frames();
+  const mainFrame = (page.mainFrame && page.mainFrame()) || allFrames[0];
+
+  // Resolve per-frame `data-percy-ignore` and ignoreIframeSelectors flags
+  // from the parent frame's DOM (where the <iframe> element lives).
+  const ignoreFlagsByFrame = new Map();
+  await Promise.all(allFrames.map(async (frame) => {
+    if (frame === mainFrame) return;
+    try {
+      const parent = (frame.parentFrame && frame.parentFrame()) || mainFrame;
+      /* istanbul ignore next: browser-executed evaluate callback */
+      const flags = await parent.evaluate(({ fUrl, selectors }) => {
+        const norm = (s) => (s || '').replace(/\/+$/, '');
+        const target = norm(fUrl);
+        const iframes = Array.from(document.querySelectorAll('iframe'));
+        const el = iframes.find(i => i.src === fUrl) || iframes.find(i => norm(i.src) === target);
+        if (!el) return { dataPercyIgnore: false, matchesIgnoreSelector: false };
+        let matches = false;
+        if (selectors && selectors.length) {
+          for (let j = 0; j < selectors.length; j++) {
+            try { if (el.matches(selectors[j])) { matches = true; break; } } catch (e) { /* invalid */ }
+          }
+        }
+        return {
+          dataPercyIgnore: el.hasAttribute('data-percy-ignore'),
+          matchesIgnoreSelector: matches
+        };
+      }, { fUrl: frame.url(), selectors: ignoreSelectors });
+      ignoreFlagsByFrame.set(frame, flags);
+    } catch (e) { /* leave entry absent */ }
+  }));
+
+  const crossOriginFrames = allFrames
     .filter(frame => {
+      if (frame === mainFrame) return false;
+      const flags = ignoreFlagsByFrame.get(frame) || {};
+      if (flags.dataPercyIgnore) {
+        log.debug(`Skipping iframe marked with data-percy-ignore: ${frame.url()}`);
+        return false;
+      }
+      if (flags.matchesIgnoreSelector) {
+        log.debug(`Skipping iframe matching ignoreIframeSelectors: ${frame.url()}`);
+        return false;
+      }
       const frameUrl = frame.url();
-      if (!frameUrl || frameUrl === 'about:blank') return false;
+      if (!frameUrl || isUnsupportedIframeSrc(frameUrl)) return false;
+      const depth = frameDepth(frame);
+      if (depth > maxFrameDepth) {
+        log.debug(`Skipping iframe at depth ${depth} (max ${maxFrameDepth}): ${frameUrl}`);
+        return false;
+      }
+      if (isCyclicFrame(frame)) {
+        log.debug(`Skipping cyclic iframe (${frameUrl} appears in ancestor chain)`);
+        return false;
+      }
       try {
-        return new URL(frameUrl).origin !== pageUrl.origin;
+        const parent = frame.parentFrame && frame.parentFrame();
+        const parentUrl = (parent && parent.url && parent.url()) || page.url();
+        const parentOrigin = parentUrl ? new URL(parentUrl).origin : null;
+        const frameOrigin = new URL(frameUrl).origin;
+        return parentOrigin !== null && frameOrigin !== parentOrigin;
       } catch {
         return false;
       }
@@ -152,6 +351,9 @@ async function captureResponsiveDOM(page, options, percyDOM) {
       if (process.env.PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE?.toLowerCase() === 'true') {
         await page.reload();
         await page.evaluate(percyDOM);
+        // Re-prime closed shadow root WeakMap — page.reload() creates a new
+        // document and discards the previous window-bound state.
+        await exposeClosedShadowRoots(page);
         /* istanbul ignore next: no instrumenting injected code */
         await page.evaluate(() => {
           /* eslint-disable-next-line no-undef */
@@ -193,6 +395,10 @@ const percySnapshot = async function(page, name, options) {
     // Inject the DOM serialization script
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
+
+    // Expose closed shadow roots via CDP before serialization so
+    // PercyDOM.serialize() can access them through the WeakMap
+    await exposeClosedShadowRoots(page);
 
     let domSnapshot = await captureDOM(page, options || {}, percyDOM);
 
@@ -302,3 +508,7 @@ module.exports.createRegion = createRegion;
 module.exports.percyScreenshot = percyScreenshot;
 module.exports.CLIENT_INFO = CLIENT_INFO;
 module.exports.ENV_INFO = ENV_INFO;
+// Exported for direct unit testing of the parentFrame-chain walkers.
+module.exports.frameDepth = frameDepth;
+module.exports.isCyclicFrame = isCyclicFrame;
+module.exports.captureSerializedDOM = captureSerializedDOM;

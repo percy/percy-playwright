@@ -721,6 +721,169 @@ test.describe('percySnapshot', () => {
     expect(width360Calls.length).toBe(1);
     expect(width360Calls[0].args[0].height).toBe(670);
   });
+
+  // --- exposeClosedShadowRoots tests (called internally by percySnapshot) ---
+
+  test('exposeClosedShadowRoots: skips silently for non-Chromium browsers (newCDPSession throws)', async ({ page }) => {
+    sinon.stub(page.context(), 'newCDPSession').rejects(new Error('CDP not supported'));
+
+    await percySnapshot(page, 'Snapshot non-Chromium');
+
+    // Verify no errors were logged (exposeClosedShadowRoots should not throw)
+    expect(helpers.logger.stderr).toEqual([]);
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot non-Chromium'
+    ]));
+  });
+
+  test('exposeClosedShadowRoots: no closed shadow roots found calls DOM.disable and succeeds', async ({ page }) => {
+    const mockCDPSession = {
+      send: sinon.stub(),
+      detach: sinon.stub().resolves()
+    };
+    sinon.stub(page.context(), 'newCDPSession').resolves(mockCDPSession);
+
+    mockCDPSession.send.withArgs('DOM.enable').resolves();
+    mockCDPSession.send.withArgs('DOM.getDocument', sinon.match.any).resolves({
+      root: {
+        nodeId: 1, backendNodeId: 1, children: [
+          {
+            nodeId: 2, backendNodeId: 2,
+            shadowRoots: [{ nodeId: 3, backendNodeId: 3, shadowRootType: 'open', children: [] }]
+          }
+        ]
+      }
+    });
+    mockCDPSession.send.withArgs('DOM.disable').resolves();
+
+    await percySnapshot(page, 'Snapshot no closed shadows');
+
+    expect(mockCDPSession.send.calledWith('DOM.enable')).toBe(true);
+    // DOM.disable is no longer called — session detach handles cleanup
+    expect(mockCDPSession.detach.called).toBe(true);
+    // Runtime.callFunctionOn should NOT have been called since no closed roots
+    expect(mockCDPSession.send.calledWith('Runtime.callFunctionOn', sinon.match.any)).toBe(false);
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot no closed shadows'
+    ]));
+  });
+
+  // Note: These tests validate CDP method calls but not the actual feature contract
+  // (that closed shadow root content appears in serialized DOM output). A future
+  // integration test with a real closed shadow root fixture would catch regressions
+  // in the end-to-end feature.
+  test('exposeClosedShadowRoots: closed shadow roots found and exposed via CDP', async ({ page }) => {
+    const mockCDPSession = {
+      send: sinon.stub(),
+      detach: sinon.stub().resolves()
+    };
+    sinon.stub(page.context(), 'newCDPSession').resolves(mockCDPSession);
+
+    mockCDPSession.send.withArgs('DOM.enable').resolves();
+    mockCDPSession.send.withArgs('DOM.getDocument', sinon.match.any).resolves({
+      root: {
+        nodeId: 1, backendNodeId: 1, children: [
+          {
+            nodeId: 2, backendNodeId: 2,
+            shadowRoots: [
+              {
+                nodeId: 3, backendNodeId: 3, shadowRootType: 'closed',
+                children: []
+              }
+            ]
+          }
+        ]
+      }
+    });
+    mockCDPSession.send.withArgs('DOM.resolveNode', sinon.match({ backendNodeId: 2 }))
+      .resolves({ object: { objectId: 'host-obj-1' } });
+    mockCDPSession.send.withArgs('DOM.resolveNode', sinon.match({ backendNodeId: 3 }))
+      .resolves({ object: { objectId: 'shadow-obj-1' } });
+    mockCDPSession.send.withArgs('Runtime.callFunctionOn', sinon.match.any).resolves();
+    mockCDPSession.send.withArgs('DOM.disable').resolves();
+
+    await percySnapshot(page, 'Snapshot with closed shadows');
+
+    expect(mockCDPSession.send.calledWith('DOM.enable')).toBe(true);
+    expect(mockCDPSession.send.calledWith('DOM.getDocument', sinon.match.any)).toBe(true);
+    expect(mockCDPSession.send.calledWith('DOM.resolveNode', sinon.match({ backendNodeId: 2 }))).toBe(true);
+    expect(mockCDPSession.send.calledWith('DOM.resolveNode', sinon.match({ backendNodeId: 3 }))).toBe(true);
+    expect(mockCDPSession.send.calledWith('Runtime.callFunctionOn', sinon.match({
+      objectId: 'host-obj-1',
+      arguments: [{ objectId: 'shadow-obj-1' }]
+    }))).toBe(true);
+    // DOM.disable is no longer called — session detach handles cleanup
+    expect(mockCDPSession.detach.called).toBe(true);
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot with closed shadows'
+    ]));
+  });
+
+  test('exposeClosedShadowRoots: catches CDP errors during processing and snapshot still succeeds', async ({ page }) => {
+    const mockCDPSession = {
+      send: sinon.stub(),
+      detach: sinon.stub().resolves()
+    };
+    sinon.stub(page.context(), 'newCDPSession').resolves(mockCDPSession);
+
+    mockCDPSession.send.withArgs('DOM.enable').resolves();
+    mockCDPSession.send.withArgs('DOM.getDocument', sinon.match.any)
+      .rejects(new Error('CDP DOM.getDocument failed'));
+
+    await percySnapshot(page, 'Snapshot CDP error');
+
+    expect(mockCDPSession.send.calledWith('DOM.enable')).toBe(true);
+    expect(mockCDPSession.detach.called).toBe(true);
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot CDP error'
+    ]));
+  });
+
+  test('exposeClosedShadowRoots: cdpSession.detach is called in finally block even on success', async ({ page }) => {
+    const mockCDPSession = {
+      send: sinon.stub(),
+      detach: sinon.stub().resolves()
+    };
+    sinon.stub(page.context(), 'newCDPSession').resolves(mockCDPSession);
+
+    // No closed roots scenario - early return path
+    mockCDPSession.send.withArgs('DOM.enable').resolves();
+    mockCDPSession.send.withArgs('DOM.getDocument', sinon.match.any).resolves({
+      root: { nodeId: 1, backendNodeId: 1, children: [] }
+    });
+    mockCDPSession.send.withArgs('DOM.disable').resolves();
+
+    await percySnapshot(page, 'Snapshot detach test');
+
+    expect(mockCDPSession.detach.calledOnce).toBe(true);
+  });
+
+  test('exposeClosedShadowRoots: cdpSession.detach is called in finally block even on error', async ({ page }) => {
+    const mockCDPSession = {
+      send: sinon.stub(),
+      detach: sinon.stub().resolves()
+    };
+    sinon.stub(page.context(), 'newCDPSession').resolves(mockCDPSession);
+
+    mockCDPSession.send.withArgs('DOM.enable').rejects(new Error('DOM.enable failed'));
+
+    await percySnapshot(page, 'Snapshot detach on error');
+
+    expect(mockCDPSession.detach.calledOnce).toBe(true);
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot detach on error'
+    ]));
+  });
 });
 
 test.describe('percyScreenshot', () => {
