@@ -63,7 +63,7 @@ async function captureSerializedDOM(page, options, percyDOM) {
   }, options);
 
   // Attach readiness diagnostics so the CLI can log timing and pass/fail
-  /* istanbul ignore if */
+  /* istanbul ignore next */
   if (readinessDiagnostics && domSnapshot && typeof domSnapshot === 'object') {
     domSnapshot.readiness_diagnostics = readinessDiagnostics;
   }
