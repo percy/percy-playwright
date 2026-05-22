@@ -40,12 +40,19 @@ async function processFrame(page, frame, options, percyDOM) {
 }
 
 async function captureSerializedDOM(page, options, percyDOM) {
-  // Readiness gate (PER-7348). `waitForReadyScript` is the shared in-browser
-  // invoker from @percy/sdk-utils — single source of truth across JS SDKs.
+  // Readiness gate (PER-7348). Helpers from @percy/sdk-utils 1.31.14+;
+  // typeof guards fall back to local resolution so a stale lockfile-pinned
+  // sdk-utils version degrades to a no-op instead of crashing the snapshot.
   let readinessDiagnostics;
-  if (!utils.isReadinessDisabled(options)) {
+  const readinessDisabled = typeof utils.isReadinessDisabled === 'function'
+    ? utils.isReadinessDisabled(options)
+    : ((options?.readiness || utils.percy?.config?.snapshot?.readiness)?.preset === 'disabled');
+  if (!readinessDisabled && typeof utils.waitForReadyScript === 'function') {
+    const readinessConfig = typeof utils.getReadinessConfig === 'function'
+      ? utils.getReadinessConfig(options)
+      : { ...(utils.percy?.config?.snapshot?.readiness || {}), ...(options?.readiness || {}) };
     readinessDiagnostics = await page.evaluate(
-      utils.waitForReadyScript(utils.getReadinessConfig(options))
+      utils.waitForReadyScript(readinessConfig)
     ).catch(err => {
       log.debug(`waitForReady failed, proceeding to serialize: ${err?.message || err}`);
     });
