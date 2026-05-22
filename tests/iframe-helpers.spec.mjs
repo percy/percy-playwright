@@ -1,7 +1,14 @@
 import { test, expect } from '@playwright/test';
 import percySnapshot from '../index.js';
 
-const { frameDepth, isCyclicFrame, captureSerializedDOM } = percySnapshot;
+const {
+  frameDepth,
+  isCyclicFrame,
+  captureSerializedDOM,
+  resolveIgnoreSelectors,
+  isUnsupportedIframeSrc,
+  resolveMaxFrameDepth
+} = percySnapshot;
 
 test.describe('frameDepth helper', () => {
   test('returns 0 for a frame with no parentFrame method', () => {
@@ -46,12 +53,22 @@ test.describe('isCyclicFrame helper', () => {
 test.describe('captureSerializedDOM filter branches', () => {
   function buildMockPage({ pageUrl, frames = [] }) {
     const lookupResult = (fnStr, args) => {
-      if (fnStr.includes('querySelectorAll')) {
-        const fUrl = args && args[0]?.fUrl;
-        const matchingFrame = frames.find(f => f.url === fUrl);
+      if (!fnStr.includes('querySelectorAll')) return undefined;
+      // Two distinct in-frame evaluations share the same querySelectorAll
+      // shape: the flag lookup (`data-percy-ignore`) and the percyElementId
+      // lookup (`data-percy-element-id`). The flag lookup also passes an
+      // object payload, while the percyElementId lookup passes a bare URL.
+      const arg0 = args && args[0];
+      const fUrl = (arg0 && typeof arg0 === 'object') ? arg0.fUrl : arg0;
+      const matchingFrame = frames.find(f => f.url === fUrl);
+      if (fnStr.includes('data-percy-ignore')) {
         if (matchingFrame?.flagsResolver) return matchingFrame.flagsResolver();
-        if (matchingFrame?.percyElementId) return { percyElementId: matchingFrame.percyElementId };
-        return undefined;
+        return { dataPercyIgnore: false, matchesIgnoreSelector: false };
+      }
+      if (fnStr.includes('data-percy-element-id')) {
+        if (matchingFrame?.percyElementId) {
+          return { percyElementId: matchingFrame.percyElementId };
+        }
       }
       return undefined;
     };
@@ -102,7 +119,9 @@ test.describe('captureSerializedDOM filter branches', () => {
 
     const result = await captureSerializedDOM(page, {}, '');
     expect(called).toBe(false);
-    expect(result.corsIframes).toEqual([]);
+    // captureSerializedDOM only sets corsIframes when at least one frame
+    // survives the filter — leaving it undefined when empty.
+    expect(result.corsIframes).toBeUndefined();
   });
 
   test('skips frames with matchesIgnoreSelector flag', async () => {
@@ -261,5 +280,129 @@ test.describe('captureSerializedDOM filter branches', () => {
 
     await captureSerializedDOM(page, {}, '');
     expect(called).toBe(false);
+  });
+
+  test('continues snapshot when percyDOM injection rejects on a frame', async () => {
+    const page = buildMockPage({
+      pageUrl: 'https://example.com/',
+      frames: [{
+        url: 'https://other.com/embed',
+        percyElementId: 'percy-iframe-x'
+      }]
+    });
+    // Force the percyDOM-injection evaluate to reject — covers the per-frame
+    // .catch around the injection Promise.all.
+    page.frames()[1].evaluate = async () => { throw new Error('detached'); };
+
+    const result = await captureSerializedDOM(page, {}, '');
+    // Snapshot still completes; the failed frame contributes nothing.
+    expect(result.html).toBeDefined();
+  });
+
+  test('drops a frame whose processFrame call throws', async () => {
+    const page = buildMockPage({
+      pageUrl: 'https://example.com/',
+      frames: [{
+        url: 'https://other.com/embed',
+        percyElementId: 'percy-iframe-y'
+      }]
+    });
+    // First evaluate succeeds (percyDOM injection), second (inside
+    // processFrame) throws — covers the per-frame .catch around processFrame.
+    let callCount = 0;
+    page.frames()[1].evaluate = async () => {
+      callCount += 1;
+      if (callCount === 1) return undefined;
+      throw new Error('navigated');
+    };
+
+    const result = await captureSerializedDOM(page, {}, '');
+    expect(result.corsIframes).toBeUndefined();
+  });
+});
+
+test.describe('resolveIgnoreSelectors helper', () => {
+  test('returns [] for falsy input', () => {
+    expect(resolveIgnoreSelectors({})).toEqual([]);
+    expect(resolveIgnoreSelectors({ ignoreIframeSelectors: null })).toEqual([]);
+  });
+
+  test('returns [] when called with no arguments', () => {
+    expect(resolveIgnoreSelectors()).toEqual([]);
+  });
+
+  test('prefers ignoreIframeSelectors over ignoreSelectors (LHS defined)', () => {
+    expect(resolveIgnoreSelectors({
+      ignoreIframeSelectors: ['.a'],
+      ignoreSelectors: ['.b']
+    })).toEqual(['.a']);
+  });
+
+  test('wraps a single string into an array', () => {
+    expect(resolveIgnoreSelectors({ ignoreIframeSelectors: '.ad' })).toEqual(['.ad']);
+  });
+
+  test('filters non-string entries from an array', () => {
+    expect(resolveIgnoreSelectors({ ignoreIframeSelectors: ['.a', '', 0, '.b'] }))
+      .toEqual(['.a', '.b']);
+  });
+
+  test('returns [] for selectors of unsupported type (e.g. number)', () => {
+    expect(resolveIgnoreSelectors({ ignoreIframeSelectors: 42 })).toEqual([]);
+  });
+});
+
+test.describe('resolveMaxFrameDepth helper', () => {
+  test('returns the sdk-utils default when no option is provided', () => {
+    expect(resolveMaxFrameDepth({})).toBe(3); // DEFAULT_MAX_IFRAME_DEPTH in 1.31.14-beta.4
+  });
+
+  test('returns the default when called with no arguments', () => {
+    expect(resolveMaxFrameDepth()).toBe(3);
+  });
+
+  test('prefers maxFrameDepth over maxIframeDepth (LHS defined)', () => {
+    expect(resolveMaxFrameDepth({ maxFrameDepth: 4 })).toBe(4);
+  });
+
+  test('returns the default when the option is null', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: null })).toBe(3);
+  });
+
+  test('returns the default when the option is NaN', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: 'abc' })).toBe(3);
+  });
+
+  test('clamps a value above the hard cap', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: 999 })).toBe(10); // HARD_MAX_IFRAME_DEPTH
+  });
+
+  test('floors negative values to 0', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: -5 })).toBe(0);
+  });
+
+  test('returns a valid value unchanged', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: 5 })).toBe(5);
+  });
+
+  test('prefers maxFrameDepth over maxIframeDepth when both set', () => {
+    expect(resolveMaxFrameDepth({ maxFrameDepth: 7, maxIframeDepth: 2 })).toBe(7);
+  });
+});
+
+test.describe('isUnsupportedIframeSrc helper', () => {
+  test('treats falsy src as unsupported', () => {
+    expect(isUnsupportedIframeSrc('')).toBe(true);
+    expect(isUnsupportedIframeSrc(null)).toBe(true);
+  });
+
+  test('flags browser-internal prefixes', () => {
+    expect(isUnsupportedIframeSrc('about:blank')).toBe(true);
+    expect(isUnsupportedIframeSrc('javascript:void(0)')).toBe(true);
+    expect(isUnsupportedIframeSrc('blob:https://example.com/abc')).toBe(true);
+  });
+
+  test('passes ordinary http(s) URLs through', () => {
+    expect(isUnsupportedIframeSrc('https://example.com/page')).toBe(false);
   });
 });

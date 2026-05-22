@@ -1,2 +1,9 @@
 node_modules
 .nyc_output
+
+# bstack-ai-harness:begin (managed — do not edit between markers)
+bstack-ai-harness.yml
+.harness-docs.json
+CLAUDE.md
+.claude/
+# bstack-ai-harness:end

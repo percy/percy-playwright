@@ -1,10 +1,35 @@
 const utils = require('@percy/sdk-utils');
 const { Utils } = require('./utils');
-const {
-  resolveMaxFrameDepth,
-  resolveIgnoreSelectors,
-  isUnsupportedIframeSrc
-} = utils;
+
+// sdk-utils 1.31.14-beta.4 exports DEFAULT_MAX_IFRAME_DEPTH (3) and
+// HARD_MAX_IFRAME_DEPTH (10) but not the resolver helpers we need; inline them
+// here until sdk-utils exposes them in a stable release.
+const BROWSER_INTERNAL_PREFIXES = [
+  'about:', 'chrome:', 'chrome-extension:', 'devtools:',
+  'edge:', 'opera:', 'view-source:', 'data:', 'javascript:', 'blob:'
+];
+
+function resolveMaxFrameDepth(options = {}) {
+  const { DEFAULT_MAX_IFRAME_DEPTH: def, HARD_MAX_IFRAME_DEPTH: hard } = utils;
+  const requested = options.maxFrameDepth ?? options.maxIframeDepth;
+  const value = requested == null ? def : Number(requested);
+  if (Number.isNaN(value)) return def;
+  return Math.max(0, Math.min(value, hard));
+}
+
+function resolveIgnoreSelectors(options = {}) {
+  const sel = options.ignoreIframeSelectors ?? options.ignoreSelectors;
+  if (!sel) return [];
+  if (Array.isArray(sel)) return sel.filter(s => typeof s === 'string' && s.length);
+  if (typeof sel === 'string') return [sel];
+  return [];
+}
+
+function isUnsupportedIframeSrc(src) {
+  if (!src) return true;
+  const s = String(src).toLowerCase();
+  return BROWSER_INTERNAL_PREFIXES.some(p => s.startsWith(p));
+}
 
 // Collect client and environment information
 const sdkPkg = require('./package.json');
@@ -261,13 +286,32 @@ async function captureSerializedDOM(page, options, percyDOM) {
       }
     });
 
-  // Inject Percy DOM into all cross-origin frames before processing them in parallel
-  await Promise.all(crossOriginFrames.map(frame => frame.evaluate(percyDOM)));
+  // Inject Percy DOM into all cross-origin frames before processing them in
+  // parallel. Per-frame `.catch` so a single detached/navigating frame doesn't
+  // fail-fast the whole Promise.all and abort the snapshot.
+  await Promise.all(crossOriginFrames.map(frame =>
+    frame.evaluate(percyDOM).catch(err => {
+      log.debug(`Percy DOM injection failed for ${frame.url()}: ${err.message}`);
+      return null;
+    })
+  ));
 
-  const processedFrames = await Promise.all(
-    crossOriginFrames.map(frame => processFrame(page, frame, options, percyDOM))
-  );
-  domSnapshot.corsIframes = processedFrames;
+  const processedFrames = (await Promise.all(
+    crossOriginFrames.map(frame =>
+      processFrame(page, frame, options, percyDOM).catch(err => {
+        log.debug(`Failed to process cross-origin frame ${frame.url()}: ${err.message}`);
+        return null;
+      })
+    )
+  ))
+    // Drop frames that errored out, were detached mid-capture, or whose
+    // percyElementId lookup came up empty. Shipping malformed entries would
+    // make the CLI reject the whole snapshot on validation.
+    .filter(f => f && f.iframeData && f.iframeData.percyElementId);
+
+  if (processedFrames.length > 0) {
+    domSnapshot.corsIframes = processedFrames;
+  }
   domSnapshot.cookies = await page.context().cookies();
   return domSnapshot;
 }
@@ -512,3 +556,6 @@ module.exports.ENV_INFO = ENV_INFO;
 module.exports.frameDepth = frameDepth;
 module.exports.isCyclicFrame = isCyclicFrame;
 module.exports.captureSerializedDOM = captureSerializedDOM;
+module.exports.resolveIgnoreSelectors = resolveIgnoreSelectors;
+module.exports.isUnsupportedIframeSrc = isUnsupportedIframeSrc;
+module.exports.resolveMaxFrameDepth = resolveMaxFrameDepth;
