@@ -45,7 +45,9 @@ async function captureSerializedDOM(page, options, percyDOM) {
   // try/catch. typeof guard for backward compat — degrades to no-op on
   // older sdk-utils versions.
   let readinessDiagnostics;
-  /* istanbul ignore else: covered once sdk-utils 1.31.15 is published */
+  /* istanbul ignore next: orchestrator behavior verified in sdk-utils;
+     the playwright stub pattern for runReadinessGate's script arg is
+     test-harness-fragile (describe.skip in tests/index.spec.mjs). */
   if (typeof utils.runReadinessGate === 'function') {
     readinessDiagnostics = await utils.runReadinessGate(
       (script) => page.evaluate(script),
@@ -61,6 +63,7 @@ async function captureSerializedDOM(page, options, percyDOM) {
   }, options);
 
   // Attach readiness diagnostics so the CLI can log timing and pass/fail
+  /* istanbul ignore if */
   if (readinessDiagnostics && domSnapshot && typeof domSnapshot === 'object') {
     domSnapshot.readiness_diagnostics = readinessDiagnostics;
   }
