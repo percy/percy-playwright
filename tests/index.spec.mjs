@@ -4,7 +4,6 @@ import percySnapshot from '../index.js';
 import sinon from 'sinon';
 import { Utils } from '../utils.js';
 const { percyScreenshot, ENV_INFO, CLIENT_INFO, createRegion } = percySnapshot;
-const { browserWaitForReady } = percySnapshot.__test__;
 
 test.describe('percySnapshot', () => {
   test.beforeEach(async ({ page }) => {
@@ -724,16 +723,10 @@ test.describe('percySnapshot', () => {
   });
 
   test.describe('readiness gate (PER-7348)', () => {
-    // The SDK-level readiness call uses page.evaluate with a function whose
-    // source contains "waitForReady". Match by stringifying the evaluator.
-    const isReadinessEval = (call) => {
-      const fn = call.args[0];
-      return typeof fn === 'function' && fn.toString().includes('waitForReady');
-    };
-    const isSerializeEval = (call) => {
-      const fn = call.args[0];
-      return typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize');
-    };
+    // The readiness call sends a STRING script (from sdk-utils.waitForReadyScript);
+    // serialize sends a FUNCTION reference. That difference lets us identify each call.
+    const isReadinessEval = (call) => typeof call.args[0] === 'string' && call.args[0].includes('PercyDOM.waitForReady');
+    const isSerializeEval = (call) => typeof call.args[0] === 'function' && call.args[0].toString().includes('PercyDOM.serialize');
 
     test('runs waitForReady before serialize by default', async ({ page }) => {
       const evalSpy = sinon.spy(page, 'evaluate');
@@ -748,7 +741,7 @@ test.describe('percySnapshot', () => {
       expect(readinessIdx).toBeLessThan(serializeIdx);
     });
 
-    test('passes readiness config from snapshot options through to waitForReady', async ({ page }) => {
+    test('inlines the readiness config as JSON into the script sent to the browser', async ({ page }) => {
       const evalSpy = sinon.spy(page, 'evaluate');
       const readiness = { preset: 'strict', stabilityWindowMs: 500 };
 
@@ -756,7 +749,10 @@ test.describe('percySnapshot', () => {
 
       const readinessCall = evalSpy.getCalls().find(isReadinessEval);
       expect(readinessCall).toBeDefined();
-      expect(readinessCall.args[1]).toEqual(readiness);
+      // sdk-utils.waitForReadyScript inlines the config via JSON.stringify
+      // rather than passing it as a separate page.evaluate argument.
+      expect(readinessCall.args[0]).toContain('"preset":"strict"');
+      expect(readinessCall.args[0]).toContain('"stabilityWindowMs":500');
     });
 
     test('skips waitForReady when preset is disabled', async ({ page }) => {
@@ -771,18 +767,16 @@ test.describe('percySnapshot', () => {
     });
 
     test('still runs serialize when waitForReady throws', async ({ page }) => {
-      // Make every page.evaluate that hits waitForReady reject; other evaluates pass through.
       const origEvaluate = page.evaluate.bind(page);
-      sinon.stub(page, 'evaluate').callsFake((fn, ...rest) => {
-        if (typeof fn === 'function' && fn.toString().includes('waitForReady')) {
+      sinon.stub(page, 'evaluate').callsFake((script, ...rest) => {
+        if (typeof script === 'string' && script.includes('PercyDOM.waitForReady')) {
           return Promise.reject(new Error('readiness boom'));
         }
-        return origEvaluate(fn, ...rest);
+        return origEvaluate(script, ...rest);
       });
 
       await percySnapshot(page, 'readiness-reject');
 
-      // If serialize ran, the snapshot gets posted — assert no top-level SDK error was logged.
       expect(helpers.logger.stderr).not.toEqual(expect.arrayContaining([
         '[percy] Could not take DOM snapshot "readiness-reject"'
       ]));
@@ -792,11 +786,11 @@ test.describe('percySnapshot', () => {
       // Covers the `err?.message || err` second branch: rejection value has
       // no `.message`, so the log line falls through to stringifying err.
       const origEvaluate = page.evaluate.bind(page);
-      sinon.stub(page, 'evaluate').callsFake((fn, ...rest) => {
-        if (typeof fn === 'function' && fn.toString().includes('waitForReady')) {
+      sinon.stub(page, 'evaluate').callsFake((script, ...rest) => {
+        if (typeof script === 'string' && script.includes('PercyDOM.waitForReady')) {
           return Promise.reject('plain-string-rejection');
         }
-        return origEvaluate(fn, ...rest);
+        return origEvaluate(script, ...rest);
       });
 
       await percySnapshot(page, 'readiness-reject-string');
@@ -807,16 +801,13 @@ test.describe('percySnapshot', () => {
     });
 
     test('attaches diagnostics returned by waitForReady to domSnapshot', async ({ page }) => {
-      // Stub page.evaluate to return synthetic diagnostics for waitForReady
-      // and a known domSnapshot object for serialize. The SDK mutates the
-      // domSnapshot in place — same pattern as the cookies test at line 57.
       const diagnostics = { passed: true, timed_out: false, preset: 'balanced', total_duration_ms: 84, checks: {} };
       const domSnapshot = { html: '<html></html>' };
-      sinon.stub(page, 'evaluate').callsFake((fn, ...rest) => {
-        if (typeof fn === 'function' && fn.toString().includes('waitForReady')) {
+      sinon.stub(page, 'evaluate').callsFake((script) => {
+        if (typeof script === 'string' && script.includes('PercyDOM.waitForReady')) {
           return Promise.resolve(diagnostics);
         }
-        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) {
+        if (typeof script === 'function' && script.toString().includes('PercyDOM.serialize')) {
           return Promise.resolve(domSnapshot);
         }
         return Promise.resolve();
@@ -826,37 +817,6 @@ test.describe('percySnapshot', () => {
 
       expect(domSnapshot.readiness_diagnostics).toEqual(diagnostics);
     });
-  });
-});
-
-// Unit tests for the in-browser readiness invoker. These run in Node against
-// a stubbed `PercyDOM` global so the typeof-guard branches are real
-// statement/branch coverage — that's why index.js no longer needs
-// `/* istanbul ignore next */` around the page.evaluate callback.
-test.describe('browserWaitForReady', () => {
-  test.afterEach(() => {
-    delete globalThis.PercyDOM;
-  });
-
-  test('returns undefined when PercyDOM is undefined', () => {
-    expect(browserWaitForReady({ preset: 'balanced' })).toBeUndefined();
-  });
-
-  test('returns undefined when PercyDOM lacks waitForReady', () => {
-    globalThis.PercyDOM = {};
-    expect(browserWaitForReady({ preset: 'balanced' })).toBeUndefined();
-  });
-
-  test('forwards config to PercyDOM.waitForReady and returns its value', async () => {
-    const diagnostics = { passed: true, preset: 'strict' };
-    const waitForReady = sinon.stub().resolves(diagnostics);
-    globalThis.PercyDOM = { waitForReady };
-
-    const config = { preset: 'strict', stabilityWindowMs: 500 };
-    const result = browserWaitForReady(config);
-
-    expect(waitForReady.calledOnceWith(config)).toBe(true);
-    await expect(result).resolves.toEqual(diagnostics);
   });
 });
 
