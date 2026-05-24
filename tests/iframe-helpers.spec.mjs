@@ -377,8 +377,18 @@ test.describe('resolveMaxFrameDepth helper', () => {
     expect(resolveMaxFrameDepth({ maxIframeDepth: 999 })).toBe(10); // HARD_MAX_IFRAME_DEPTH
   });
 
-  test('floors negative values to 0', () => {
-    expect(resolveMaxFrameDepth({ maxIframeDepth: -5 })).toBe(0);
+  test('treats 0 as "use default" (matches sdk-utils clampIframeDepth)', () => {
+    // Previously Math.max(0, ...) returned 0, which disabled all CORS
+    // iframe capture (depth > 0 filter rejected every iframe at depth 1).
+    expect(resolveMaxFrameDepth({ maxIframeDepth: 0 })).toBe(3);
+  });
+
+  test('treats negative values as default rather than clamping to 0', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: -5 })).toBe(3);
+  });
+
+  test('floors fractional values', () => {
+    expect(resolveMaxFrameDepth({ maxIframeDepth: 4.7 })).toBe(4);
   });
 
   test('returns a valid value unchanged', () => {
