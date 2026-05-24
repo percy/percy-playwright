@@ -12,9 +12,14 @@ const BROWSER_INTERNAL_PREFIXES = [
 function resolveMaxFrameDepth(options = {}) {
   const { DEFAULT_MAX_IFRAME_DEPTH: def, HARD_MAX_IFRAME_DEPTH: hard } = utils;
   const requested = options.maxFrameDepth ?? options.maxIframeDepth;
-  const value = requested == null ? def : Number(requested);
-  if (Number.isNaN(value)) return def;
-  return Math.max(0, Math.min(value, hard));
+  if (requested == null) return def;
+  const value = Number(requested);
+  // Match @percy/sdk-utils clampIframeDepth semantics: any non-finite or
+  // sub-1 value falls back to the default. Without this, a caller passing
+  // 0 (or a negative number) would silently set the depth gate to 0 and
+  // disable all CORS iframe capture.
+  if (!Number.isFinite(value) || value < 1) return def;
+  return Math.min(Math.floor(value), hard);
 }
 
 function resolveIgnoreSelectors(options = {}) {
