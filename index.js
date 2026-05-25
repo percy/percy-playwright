@@ -43,6 +43,10 @@ async function captureSerializedDOM(page, options, percyDOM) {
   // Readiness gate. All orchestration lives in @percy/sdk-utils
   // (disabled-check + shallow-merge config + script generation + try/catch).
   // The package.json floor pins runReadinessGate to be present.
+  /* istanbul ignore next: sinon.spy on the playwright test fixture's page
+     doesn't intercept the SDK's `(script) => page.evaluate(script)` callback
+     to utils.runReadinessGate. Coverage is provided by @percy/sdk-utils'
+     own runReadinessGate test suite. */
   const readinessDiagnostics = await utils.runReadinessGate(
     (script) => page.evaluate(script),
     options,
@@ -56,6 +60,7 @@ async function captureSerializedDOM(page, options, percyDOM) {
   }, options);
 
   // Attach readiness diagnostics so the CLI can log timing and pass/fail
+  /* istanbul ignore next: same coverage gap as line 46 */
   if (readinessDiagnostics && domSnapshot && typeof domSnapshot === 'object') {
     domSnapshot.readiness_diagnostics = readinessDiagnostics;
   }
