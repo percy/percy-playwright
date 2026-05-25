@@ -40,7 +40,7 @@ async function processFrame(page, frame, options, percyDOM) {
 }
 
 async function captureSerializedDOM(page, options, percyDOM) {
-  // Readiness gate (PER-7348). All orchestration lives in @percy/sdk-utils
+  // Readiness gate. All orchestration lives in @percy/sdk-utils
   // 1.31.15+: disabled-check + shallow-merge config + script generation +
   // try/catch. typeof guard for backward compat — degrades to no-op on
   // older sdk-utils versions.
