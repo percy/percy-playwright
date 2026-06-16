@@ -35,7 +35,7 @@
     "playwright-core": ">=1"
   },
   "devDependencies": {
-    "@percy/cli": "^1.32.0-beta.4",
+    "@percy/cli": "^2.0.0-alpha.0",
     "@playwright/test": "^1.24.2",
     "babel-eslint": "^10.1.0",
     "cross-env": "^7.0.2",
