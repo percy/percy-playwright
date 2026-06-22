@@ -762,7 +762,7 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
-  test('exposeClosedShadowRoots: no closed shadow roots found calls DOM.disable and succeeds', async ({ page }) => {
+  test('exposeClosedShadowRoots: no closed shadow roots found detaches session and succeeds', async ({ page }) => {
     const mockCDPSession = {
       send: sinon.stub(),
       detach: sinon.stub().resolves()
