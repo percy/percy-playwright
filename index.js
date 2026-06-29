@@ -1,12 +1,16 @@
 const utils = require('@percy/sdk-utils');
 const { Utils } = require('./utils');
 
-// sdk-utils 1.31.14-beta.4 exports DEFAULT_MAX_IFRAME_DEPTH (3) and
-// HARD_MAX_IFRAME_DEPTH (10) but not the resolver helpers we need; inline them
-// here until sdk-utils exposes them in a stable release.
+// Inlined to stay robust across @percy/cli versions (this SDK has no direct
+// @percy/sdk-utils dependency, so the hoisted version isn't guaranteed to
+// export the resolver helpers). Kept behaviourally aligned with the canonical
+// helpers in @percy/sdk-utils (percy/cli #2319): depth bounds come from
+// sdk-utils (DEFAULT=3 / HARD=10) and this list mirrors the canonical
+// UNSUPPORTED_IFRAME_SRCS (15 prefixes, incl. vbscript/file/ws/wss/ftp).
 const BROWSER_INTERNAL_PREFIXES = [
   'about:', 'chrome:', 'chrome-extension:', 'devtools:',
-  'edge:', 'opera:', 'view-source:', 'data:', 'javascript:', 'blob:'
+  'edge:', 'opera:', 'view-source:', 'data:', 'javascript:', 'blob:',
+  'vbscript:', 'file:', 'ws:', 'wss:', 'ftp:'
 ];
 
 function resolveMaxFrameDepth(options = {}) {
@@ -23,11 +27,17 @@ function resolveMaxFrameDepth(options = {}) {
 }
 
 function resolveIgnoreSelectors(options = {}) {
-  const sel = options.ignoreIframeSelectors ?? options.ignoreSelectors;
-  if (!sel) return [];
-  if (Array.isArray(sel)) return sel.filter(s => typeof s === 'string' && s.length);
-  if (typeof sel === 'string') return [sel];
-  return [];
+  // Mirrors @percy/sdk-utils resolveIgnoreSelectors: per-snapshot option wins,
+  // otherwise fall back to the global percy.config.snapshot.ignoreIframeSelectors.
+  const normalize = sel => {
+    if (!sel) return [];
+    if (Array.isArray(sel)) return sel.filter(s => typeof s === 'string' && s.length);
+    if (typeof sel === 'string') return [sel];
+    return [];
+  };
+  const perSnapshot = normalize(options.ignoreIframeSelectors ?? options.ignoreSelectors);
+  if (perSnapshot.length) return perSnapshot;
+  return normalize(utils?.percy?.config?.snapshot?.ignoreIframeSelectors);
 }
 
 function isUnsupportedIframeSrc(src) {
