@@ -24,6 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const utils = require('@percy/sdk-utils');
 const { preflightTokenScope } = require('./sync');
+const { sanitizePath } = require('./paths');
 
 const log = utils.logger('playwright-dropin');
 
@@ -44,8 +45,9 @@ let _cache = null;
 
 // Read the in-package config file from `rootDir` if present. Returns {} when absent.
 function readConfigFile(rootDir) {
+  const base = sanitizePath(rootDir);
   for (const name of CONFIG_FILENAMES) {
-    const file = path.join(rootDir, name);
+    const file = path.join(base, name);
     if (!fs.existsSync(file)) continue;
     try {
       if (file.endsWith('.json')) return JSON.parse(fs.readFileSync(file, 'utf8'));

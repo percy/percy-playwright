@@ -12,6 +12,7 @@ import '../dropin/index.js';
 import dropinDom from '../dropin/dom.js';
 import firstBuild from '../dropin/baseline/first-build.js';
 import identity from '../dropin/identity.js';
+import paths from '../dropin/paths.js';
 
 const { captureDomSnapshot, SCOPE_ATTR } = dropinDom;
 const { firstBuildBaseline, OUTCOME, BASELINE_SOURCE } = firstBuild;
@@ -69,6 +70,15 @@ test.describe('drop-in units', () => {
     expect(deriveName(undefined, ti)).toBe('suite-case-2');
     expect(deriveName('banner.png', ti)).toBe('banner');
     expect(deriveName('banner.png', ti)).toBe('banner-1');
+  });
+
+  test('path hygiene strips NUL bytes and rejects multi-component dirent names', () => {
+    expect(paths.sanitizePath('/repo\0/x')).toBe('/repo/x');
+    expect(paths.sanitizeDirentName('home-snapshots')).toBe('home-snapshots');
+    expect(paths.sanitizeDirentName('..')).toBe(null);
+    expect(paths.sanitizeDirentName('a/b')).toBe(null);
+    expect(paths.sanitizeDirentName('a\\b')).toBe(null);
+    expect(paths.sanitizeDirentName('')).toBe(null);
   });
 
   test('firstBuildBaseline seeds committed PNGs only when the server marked the build as baseline', async () => {
