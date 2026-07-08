@@ -52,6 +52,7 @@ const CLIENT_INFO = `${sdkPkg.name}/${sdkPkg.version}`;
 // Best-effort: on newer Playwright the runner may be mid-load when this module is required
 // (CJS↔ESM interop), and consumers may have only @playwright/test installed — degrade to a bare
 // label rather than crashing at import time.
+// istanbul ignore next - which fallback executes depends on the consumer's installed packages
 const ENV_INFO = (() => {
   try { return `playwright/${require('playwright/package.json').version}`; } catch {}
   try { return `playwright/${require('@playwright/test/package.json').version}`; } catch {}
