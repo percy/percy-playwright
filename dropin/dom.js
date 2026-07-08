@@ -70,6 +70,7 @@ async function captureDomSnapshot(pageOrLocator, options = {}, deps = {}) {
   // after capture so the live page is left untouched.
   let scope = null;
   if (locator) {
+    // istanbul ignore next - browser-executed function (instrumentation counters don't exist there)
     await locator.evaluate((el, attr) => el.setAttribute(attr, ''), SCOPE_ATTR);
     scope = `[${SCOPE_ATTR}]`;
   }
@@ -82,6 +83,7 @@ async function captureDomSnapshot(pageOrLocator, options = {}, deps = {}) {
     domSnapshot = await capture(page, {}, percyDOM);
   } finally {
     if (locator) {
+      // istanbul ignore next - browser-executed function (instrumentation counters don't exist there)
       await locator.evaluate((el, attr) => el.removeAttribute(attr), SCOPE_ATTR).catch(() => {});
     }
   }
