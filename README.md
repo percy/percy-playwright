@@ -61,6 +61,59 @@ $ percy exec -- node script.js
 - `options` - [See per-snapshot configuration options](https://www.browserstack.com/docs/percy/take-percy-snapshots/overview#per-snapshot-configuration)
 
 
+## toHaveScreenshot drop-in
+
+Route your existing Playwright `expect(...).toHaveScreenshot()` assertions through Percy with
+**one config line and no test changes**:
+
+```js
+// playwright.config.js
+require('@percy/playwright/dropin'); // registers the toHaveScreenshot override
+
+module.exports = defineConfig({ /* your config */ });
+```
+
+```bash
+PERCY_TOKEN=<project-token> npx percy-playwright exec -- npx playwright test
+```
+
+The bundled `percy-playwright` wrapper tags the build (`PERCY_BUILD_SOURCE=playwright-dropin`) and
+marks it as a first-build baseline candidate (`PERCY_DROPIN_BASELINE_CANDIDATE=true`); the Percy
+API decides first-ness server-side. Every `toHaveScreenshot()` is captured and uploaded to Percy;
+the assertion **always passes locally** — the visual verdict moves to Percy's review UI, and a
+missing/invalid token or any Percy error **never fails your suite** (the whole run falls back to
+native `toHaveScreenshot`).
+
+### First build from your committed baselines
+
+Add the drop-in's `globalSetup` and the project's **first** build is seeded from the Playwright
+baseline PNGs already committed in your repo — the baselines you've already blessed — and
+auto-approved server-side (flag-gated), so diffs start on your very next run:
+
+```js
+module.exports = defineConfig({
+  globalSetup: require.resolve('@percy/playwright/dropin/global-setup'),
+  /* your config */
+});
+```
+
+### Capture modes
+
+Zero-config uses screenshot mode (raw-PNG upload — generic/app Percy projects). For a **web**
+Percy project, switch to DOM capture in `.percy-playwright-dropin.json`:
+
+```json
+{ "captureMode": "snapshot" }
+```
+
+Snapshot mode serializes the live page with the same capture `percySnapshot()` uses (readiness
+gate, responsive capture, cross-origin iframes) and Percy renders it server-side. Locator
+subjects become element-scoped snapshots. An optional CI gate is available via
+`reporter: [['@percy/playwright/dropin/reporter']]` with `{ "gate": "fail-on-changes" }`.
+
+Requires `@playwright/test` >= 1.49 (the override hooks Playwright's expect internals; on
+unsupported versions it degrades to a no-op **with a loud warning** — never silently).
+
 ## Percy on Automate
 
 ## Usage
