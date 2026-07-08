@@ -86,9 +86,11 @@ native `toHaveScreenshot`).
 
 ### First build from your committed baselines
 
-Add the drop-in's `globalSetup` and the project's **first** build is seeded from the Playwright
-baseline PNGs already committed in your repo — the baselines you've already blessed — and
-auto-approved server-side (flag-gated), so diffs start on your very next run:
+For **app/generic** projects (raw-PNG flow), add the drop-in's `globalSetup` and the project's
+**first** build is seeded from the Playwright baseline PNGs already committed in your repo — the
+baselines you've already blessed — and auto-approved server-side (flag-gated), so diffs start on
+your very next run (web and Automate projects skip the seed and diff against their existing
+baseline as usual):
 
 ```js
 module.exports = defineConfig({
@@ -97,19 +99,19 @@ module.exports = defineConfig({
 });
 ```
 
-### Capture modes
+### Capture dispatch (automatic)
 
-Zero-config uses screenshot mode (raw-PNG upload — generic/app Percy projects). For a **web**
-Percy project, switch to DOM capture in `.percy-playwright-dropin.json`:
+The override detects your Percy **project type** from the token (via the CLI healthcheck) and
+delegates to the SDK flow that project accepts — no capture configuration:
 
-```json
-{ "captureMode": "snapshot" }
-```
+| Project type | Flow |
+|---|---|
+| **Web** (default) | `percySnapshot()` — the live page is serialized (readiness gate, responsive capture, cross-origin iframes) and Percy renders it server-side. Locator subjects become element-scoped snapshots. |
+| **Automate** | `percyScreenshot()` — Percy on Automate captures the remote session's screen. |
+| **App / generic** | The pre-rendered PNG is captured with Playwright's own screenshot semantics and uploaded as-is. |
 
-Snapshot mode serializes the live page with the same capture `percySnapshot()` uses (readiness
-gate, responsive capture, cross-origin iframes) and Percy renders it server-side. Locator
-subjects become element-scoped snapshots. An optional CI gate is available via
-`reporter: [['@percy/playwright/dropin/reporter']]` with `{ "gate": "fail-on-changes" }`.
+An optional CI gate is available via `reporter: [['@percy/playwright/dropin/reporter']]` with
+`{ "gate": "fail-on-changes" }`.
 
 Requires `@playwright/test` >= 1.49 (the override hooks Playwright's expect internals; on
 unsupported versions it degrades to a no-op **with a loud warning** — never silently).

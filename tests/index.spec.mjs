@@ -59,23 +59,28 @@ test.describe('percySnapshot', () => {
   });
 
   test('posts snapshots to the local percy server', async ({ page }) => {
-    await percySnapshot(page, 'Snapshot 1');
-    await percySnapshot(page, 'Snapshot 2');
-    await percySnapshot(page, 'Snapshot 3', { sync: true });
+    // The CLI testing server's log store is shared across parallel workers and wiped by every
+    // test's setupTest — a read-back can race a concurrent reset. Retry the post+read block as a
+    // unit (same guard as the drop-in dispatch tests).
+    await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1');
+      await percySnapshot(page, 'Snapshot 2');
+      await percySnapshot(page, 'Snapshot 3', { sync: true });
 
-    // Add delay to ensure logs are captured
-    // temp for alpha release
-    await new Promise(resolve => setTimeout(resolve, 100));
+      // Add delay to ensure logs are captured
+      // temp for alpha release
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      'Snapshot found: Snapshot 2',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/),
-      expect.stringMatching(/The Synchronous CLI functionality is not compatible with skipUploads option./)
-    ]));
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        'Snapshot found: Snapshot 2',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/),
+        expect.stringMatching(/The Synchronous CLI functionality is not compatible with skipUploads option./)
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('adds cookies to domSnapshot', async ({ page }) => {

@@ -1,14 +1,20 @@
 'use strict';
 
-// @percy/playwright-dropin — overrides Playwright's toHaveScreenshot() so existing visual tests
-// route their captured PNGs into Percy (screenshot/BYOS mode), with one config line and no test
-// rewrites. Requiring this module registers the override globally (Q3-proven: applies to tests
-// importing `expect` straight from @playwright/test).
+// @percy/playwright/dropin — overrides Playwright's toHaveScreenshot() so existing visual tests
+// route through Percy, with one config line and no test rewrites. Requiring this module registers
+// the override globally (Q3-proven: applies to tests importing `expect` straight from
+// @playwright/test).
 //
-// V1 behaviour (per plan):
-//   • Capture: full-override (KD4) via a side-effect-free seam (src/capture.js).
-//   • Post: the EXISTING postComparison path (KD3 — pure reuse, web-shaped tag + base64 content tile).
-//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seam (KD4): the strategy returns data;
+// Capture dispatch is AUTOMATIC, by the Percy PROJECT TYPE (config.js captureFlowFor — the CLI
+// healthcheck's `percy.type`), delegating to the SDK flows that already exist in ../index.js:
+//   • web      → percySnapshot's serialized-DOM flow (dom.js seam adds Locator scoping).
+//   • automate → percyScreenshot (Percy on Automate).
+//   • app/generic → raw-PNG upload through the EXISTING postComparison ingest (KD3 — web-shaped
+//     tag + base64 content tile; capture.js owns the pixel capture, the only piece the root SDK
+//     doesn't already have).
+//
+// Behaviour (per plan):
+//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seams (KD4): the flows return data;
 //     index.js decides whether to pass/throw based on the active mode:
 //       - async always-pass (D6, default): never throw; verdict deferred to Percy review.
 //       - compat (D6/KD5): run the NATIVE matcher's throw semantics (missing-baseline suppressed).
@@ -21,11 +27,11 @@
 const { expect: baseExpect, test } = require('@playwright/test');
 const utils = require('@percy/sdk-utils');
 const { captureFullOverride } = require('./capture');
-const { captureDomSnapshot } = require('./dom');
+const { snapshotViaPercy, resolvePageAndLocator } = require('./dom');
 const { deriveIdentity } = require('./identity');
 const fallback = require('./fallback');
 const { classifySyncResult } = require('./sync');
-const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine } = require('./config');
+const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine, captureFlowFor } = require('./config');
 
 const { CLIENT_INFO, ENV_INFO } = require('./version-info');
 const { pngDimensions } = require('./png');
@@ -111,22 +117,10 @@ function comparisonOptions({ name, browserFamily, width, pngBuffer, sync }) {
   return options;
 }
 
-// Build the postSnapshot options for a serialized DOM (captureMode: 'snapshot'). The test's
-// viewport pins the render width/minHeight so the server-side render matches the width the
-// assertion ran at; `scope` (present for Locator subjects) clips the render to the element.
-function snapshotPostOptions({ name, width, viewport, url, domSnapshot, scope, sync }) {
-  const options = {
-    name,
-    widths: [width],
-    clientInfo: CLIENT_INFO,
-    environmentInfo: ENV_INFO,
-    url,
-    domSnapshot
-  };
-  if (viewport && viewport.height) options.minHeight = viewport.height;
-  if (scope) options.scope = scope;
-  if (sync) options.sync = true;
-  return options;
+// Lazy-required at dispatch time for the same CJS↔ESM interop reason as dom.js: the root module
+// may be mid-load when the drop-in entry is evaluated (specs import both as ESM).
+function rootPercyScreenshot(...args) {
+  return require('../index.js').percyScreenshot(...args);
 }
 
 const percyMatchers = {
@@ -165,23 +159,35 @@ const percyMatchers = {
 
       const { name, browserFamily, width } = deriveIdentity(pageOrLocator, nameArg, currentTestInfo());
 
-      if (config.captureMode === 'snapshot') {
-        // V2 — serialized-DOM web snapshot (dom.js seam): Percy renders server-side (web project).
-        // Same identity name, same throw policy; the render width is pinned to the test's viewport.
-        const { domSnapshot, url, scope, viewport } = await captureDomSnapshot(pageOrLocator, options);
-        const postOptions = snapshotPostOptions({ name, width, viewport, url, domSnapshot, scope, sync: config.sync });
+      // Automatic dispatch by Percy project type (utils.percy.type, cached by the
+      // isPercyEnabled() above) — delegate to the SDK flow the project actually accepts.
+      const flow = captureFlowFor();
 
+      if (flow === 'snapshot') {
+        // WEB project — the SDK's own percySnapshot (serialized DOM, server-side render), via the
+        // dom.js seam that adds Locator scoping + viewport identity pinning. percySnapshot
+        // swallows its own errors and returns the postSnapshot data; an undefined result in sync
+        // mode lands in the classifier's no-verdict bucket (never a false-green — the gate
+        // backstops).
+        const response = await snapshotViaPercy(pageOrLocator, name, { width, sync: config.sync }, options);
         if (config.sync) {
-          // Snapshot sync rides the same .percy.yml snapshot.sync; an unrecognised verdict shape
-          // classifies as no-verdict (never a false-green — the gate backstops).
-          const response = await utils.postSnapshot(postOptions);
           assertSyncEngaged(config);
-          syncResult = (response && response.body && response.body.data) || response;
-        } else {
-          await fallback.retryablePost(() => utils.postSnapshot(postOptions));
+          syncResult = response;
+        }
+      } else if (flow === 'automate') {
+        // AUTOMATE project — the SDK's own percyScreenshot (Percy on Automate). The remote session
+        // captures the full screen; Locator scoping has no equivalent there.
+        const { page, locator } = resolvePageAndLocator(pageOrLocator);
+        if (locator) {
+          log.debug('Percy: Automate screenshots capture the session screen — Locator scoping is ignored');
+        }
+        const data = await rootPercyScreenshot(page, name, config.sync ? { sync: true } : undefined);
+        if (config.sync) {
+          assertSyncEngaged(config);
+          syncResult = data;
         }
       } else {
-        // V1 — screenshot/BYOS (capture.js seam): upload the pre-rendered PNG (generic/app project).
+        // APP/GENERIC project — screenshot/BYOS (capture.js seam): upload the pre-rendered PNG.
         const pngBuffer = await captureFullOverride(pageOrLocator, options);
         const postOptions = comparisonOptions({ name, browserFamily, width, pngBuffer, sync: config.sync });
 

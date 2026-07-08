@@ -16,7 +16,7 @@
 // or, if the consumer already has a globalSetup, call `baselineGlobalSetup()` from inside it.
 const utils = require('@percy/sdk-utils');
 const { firstBuildBaseline, OUTCOME } = require('./baseline/first-build');
-const { loadConfig } = require('./config');
+const { captureFlowFor } = require('./config');
 
 const { CLIENT_INFO, ENV_INFO } = require('./version-info');
 const log = utils.logger('playwright-dropin');
@@ -85,12 +85,15 @@ async function baselineGlobalSetup(config) {
     }
 
     // The committed-baseline seed uploads Playwright's PNGs through the raw-image (screenshot)
-    // ingest — meaningless for a web project, whose baselines are server-side renders. In snapshot
-    // mode the build diffs against the project's existing web baseline as usual.
-    if (loadConfig().captureMode === 'snapshot') {
-      log.info('Percy: the committed-baseline seed is screenshot-mode only — skipped ' +
-        '(captureMode: snapshot; this build diffs against your project\'s existing baseline as usual)');
-      return { firstBuild: false, seeded: 0, outcome: 'snapshot-mode' };
+    // ingest — meaningless for web projects (baselines are server-side renders) and for Automate
+    // projects (screenshots come from the remote session). It only applies when the project type
+    // dispatches to the raw-PNG flow (app/generic). isPercyEnabled() above cached percy.type.
+    const flow = captureFlowFor();
+    if (flow !== 'screenshot') {
+      log.info('Percy: the committed-baseline seed applies to app/generic projects only — skipped ' +
+        `(${(utils.percy && utils.percy.type) || 'web'} project; this build diffs against your ` +
+        'project\'s existing baseline as usual)');
+      return { firstBuild: false, seeded: 0, outcome: `${flow}-flow` };
     }
 
     // Map Playwright config → discover inputs. `config.rootDir`/`configFile` are best-effort: the

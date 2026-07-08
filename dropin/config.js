@@ -7,8 +7,6 @@
 // hatch. Zero-config works WITHOUT a file — the file only overrides defaults.
 //
 // Fields (drop-in only — NOT sync):
-//   • captureMode: 'screenshot' (default — BYOS raw-PNG upload, generic/app projects) or
-//     'snapshot' (V2 — serialized-DOM web snapshot, Percy renders server-side, WEB projects).
 //   • gate:    'informational' (default) | 'fail-on-changes'   (Unit 5)
 //   • compat:  boolean — preserve native throw semantics (Unit 6 / D6)
 //   • fallback: boolean (default true) — native fallback when Percy is disabled at run start (D7)
@@ -29,10 +27,8 @@ const { sanitizePath } = require('./paths');
 const log = utils.logger('playwright-dropin');
 
 const CONFIG_FILENAMES = ['.percy-playwright-dropin.js', '.percy-playwright-dropin.json', 'percy-playwright-dropin.config.js'];
-const VALID_CAPTURE_MODES = Object.freeze(['screenshot', 'snapshot']);
 
 const DEFAULTS = Object.freeze({
-  captureMode: 'screenshot',
   gate: 'informational',
   compat: false,
   fallback: true,
@@ -86,15 +82,6 @@ function loadConfig({ rootDir = process.cwd(), force = false } = {}) {
   // Track which throw-mode fields the user set explicitly (vs the default). Used by validateConfig
   // to distinguish a deliberate conflict from the implicit always-pass default.
   merged._explicit = explicit;
-
-  // captureMode validation: 'screenshot' (raw PNG / generic+app projects) or 'snapshot'
-  // (serialized-DOM web snapshot / web projects).
-  if (!VALID_CAPTURE_MODES.includes(merged.captureMode)) {
-    throw new Error(
-      `Percy drop-in: captureMode "${merged.captureMode}" is not supported — ` +
-      `use ${VALID_CAPTURE_MODES.map(m => `"${m}"`).join(' or ')}.`
-    );
-  }
 
   // sync comes from the global .percy.yml (never the file). When sync is on, the always-pass posture
   // is implicitly off (sync owns the throw decision) — but we DON'T silently flip the user's
@@ -176,13 +163,27 @@ function assertSyncEngaged(config = loadConfig()) {
   return true;
 }
 
+// Capture-flow dispatch — the override delegates to the SDK flow that matches the Percy PROJECT
+// TYPE (the CLI healthcheck's `percy.type`, derived from the token). No user config involved:
+//   • 'web' (and legacy/unknown tokens) → 'snapshot'  — percySnapshot's serialized-DOM flow,
+//     rendered server-side by Percy.
+//   • 'automate'                        → 'automate'  — percyScreenshot (Percy on Automate).
+//   • 'app' / 'generic' (anything else) → 'screenshot' — raw-PNG upload through the comparison
+//     ingest (the only screenshot path those projects accept; percyScreenshot is Automate-only).
+function captureFlowFor(type = utils.percy && utils.percy.type) {
+  if (type === 'automate') return 'automate';
+  if (type == null || type === 'web') return 'snapshot';
+  return 'screenshot';
+}
+
 // Status line (plan §User-Facing States "Mode status line").
 function modeStatusLine(config = loadConfig()) {
   let mode = 'async-always-pass';
   if (config.sync) mode = 'sync';
   else if (config.compat) mode = 'compat';
   const gate = config.sync ? 'fail-on-changes' : config.gate;
-  return `Percy drop-in: mode=${mode} | capture=${config.captureMode} | gate=${gate}`;
+  const type = (utils.percy && utils.percy.type) || 'web';
+  return `Percy drop-in: mode=${mode} | capture=${captureFlowFor(type)} (auto: ${type} project) | gate=${gate}`;
 }
 
 function _reset() { _cache = null; }
@@ -192,10 +193,10 @@ module.exports = {
   validateConfig,
   assertSyncEngaged,
   modeStatusLine,
+  captureFlowFor,
   readConfigFile,
   deferredUploadSet,
   DEFAULTS,
-  VALID_CAPTURE_MODES,
   CONFIG_FILENAMES,
   _reset
 };
