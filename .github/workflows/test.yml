@@ -41,6 +41,9 @@ jobs:
           key: v1/${{ runner.os }}/node-${{ matrix.node }}/${{ hashFiles('**/yarn.lock') }}
           restore-keys: v1/${{ runner.os }}/node-${{ matrix.node }}/
       - run: yarn
+      # Playwright >=1.39 no longer downloads browsers on package install — fetch the one the
+      # suite launches explicitly (system deps included for the runner image).
+      - run: npx playwright install --with-deps chromium
       - name: Set up @percy/cli from git
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
