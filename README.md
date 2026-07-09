@@ -74,41 +74,41 @@ module.exports = defineConfig({ /* your config */ });
 ```
 
 ```bash
-PERCY_TOKEN=<project-token> npx percy-playwright exec -- npx playwright test
+PERCY_TOKEN=<web-project-token> npx percy exec -- npx playwright test
 ```
 
-The bundled `percy-playwright` wrapper tags the build (`PERCY_BUILD_SOURCE=playwright-dropin`) and
-marks it as a first-build baseline candidate (`PERCY_DROPIN_BASELINE_CANDIDATE=true`); the Percy
-API decides first-ness server-side. Every `toHaveScreenshot()` is captured and uploaded to Percy;
-the assertion **always passes locally** — the visual verdict moves to Percy's review UI, and a
-missing/invalid token or any Percy error **never fails your suite** (the whole run falls back to
-native `toHaveScreenshot`).
+Just the standard `percy exec` — no wrapper, no extra flags. Every `toHaveScreenshot()` becomes a
+Percy **web snapshot**: the live page is serialized with the same capture `percySnapshot()` uses
+(readiness gate, responsive capture, cross-origin iframes) and Percy renders it server-side;
+Locator subjects become element-scoped snapshots. The assertion **always passes locally** — the
+visual verdict moves to Percy's review UI, and a missing/invalid token or any Percy error **never
+fails your suite** (the whole run falls back to native `toHaveScreenshot`). The drop-in requires a
+**web** project token; an app/automate token raises a clear configuration error.
 
-### First build from your committed baselines
+### Your committed baselines become the first build — automatically
 
-For **app/generic** projects (raw-PNG flow), add the drop-in's `globalSetup` and the project's
-**first** build is seeded from the Playwright baseline PNGs already committed in your repo — the
-baselines you've already blessed — and auto-approved server-side (flag-gated), so diffs start on
-your very next run (web and Automate projects skip the seed and diff against their existing
-baseline as usual):
+On a **new (empty) Percy project**, `percy exec` detects this package plus the Playwright baseline
+PNGs already committed in your repo (`*-snapshots` directories) and establishes the baseline before
+your tests run:
 
-```js
-module.exports = defineConfig({
-  globalSetup: require.resolve('@percy/playwright/dropin/global-setup'),
-  /* your config */
-});
+1. **Build #1** — your committed screenshots are uploaded directly (the suite does NOT run for
+   this) and the build is auto-approved server-side: these are the baselines you've already
+   blessed.
+2. **Build #2** — your actual command runs and diffs against that baseline immediately.
+
+With no committed screenshots, the first run itself becomes the auto-approved baseline (matching
+native Playwright's "first run writes the baselines" behavior). The Percy API decides first-ness
+from the project token — the flag can never re-baseline an established project.
+
+### Existing projects: `percy playwright:setup-baseline`
+
+On a project that already has builds, `percy exec` never re-baselines — it prints a notice and
+carries on. To deliberately (re-)establish the baseline from your committed screenshots (no tests
+run, auto-approved):
+
+```bash
+PERCY_TOKEN=<web-project-token> npx percy playwright:setup-baseline
 ```
-
-### Capture dispatch (automatic)
-
-The override detects your Percy **project type** from the token (via the CLI healthcheck) and
-delegates to the SDK flow that project accepts — no capture configuration:
-
-| Project type | Flow |
-|---|---|
-| **Web** (default) | `percySnapshot()` — the live page is serialized (readiness gate, responsive capture, cross-origin iframes) and Percy renders it server-side. Locator subjects become element-scoped snapshots. |
-| **Automate** | `percyScreenshot()` — Percy on Automate captures the remote session's screen. |
-| **App / generic** | The pre-rendered PNG is captured with Playwright's own screenshot semantics and uploaded as-is. |
 
 An optional CI gate is available via `reporter: [['@percy/playwright/dropin/reporter']]` with
 `{ "gate": "fail-on-changes" }`.

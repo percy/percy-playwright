@@ -6,34 +6,30 @@
 // Playwright's extend() guard makes possible) leaves the suite green with zero Percy traffic, so
 // these tests must fail loudly if nothing was posted.
 //
-// Dispatch is automatic by project type (utils.percy.type from the healthcheck): the testing
-// server reports 'web' (token-less default), so the default path is the percySnapshot flow;
-// the app and automate paths are exercised by overriding the cached utils.percy.type in-process.
-import sinon from 'sinon';
+// The drop-in is WEB-ONLY: every assertion is a percySnapshot web snapshot (the testing server
+// reports type 'web' — the token-less default). A non-web token is a configuration error.
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import helpers from '@percy/sdk-utils/test/helpers';
 import utils from '@percy/sdk-utils';
 import { test, expect } from '@playwright/test';
-import '../dropin/index.js';
+import dropin from '../dropin/index.js';
 import dropinDom from '../dropin/dom.js';
-import firstBuild from '../dropin/baseline/first-build.js';
 import identity from '../dropin/identity.js';
 import paths from '../dropin/paths.js';
-import { Utils } from '../utils.js';
+import provider from '../dropin/baseline/provider.js';
+import resolveConfig from '../dropin/baseline/resolve-config.js';
+import ConfigReporter from '../dropin/baseline/config-reporter.js';
 
 const { snapshotViaPercy, SCOPE_ATTR } = dropinDom;
-const { firstBuildBaseline, OUTCOME, BASELINE_SOURCE } = firstBuild;
 const { deriveName, _resetCounters } = identity;
+const { _resetRunState } = dropin;
+const { resolvePlaywrightConfig } = resolveConfig;
 
 async function recorded(endpoint) {
   const res = await utils.request('/test/requests');
   return (res.body.requests || []).filter(r => r.url.startsWith(endpoint));
-}
-
-// Pin the project type the dispatch reads. The matcher's isPercyEnabled() re-fetches the
-// healthcheck only while percy.enabled is unset, so prime it first, then override the cached type.
-async function withProjectType(type) {
-  await utils.isPercyEnabled();
-  utils.percy.type = type;
 }
 
 test.describe('toHaveScreenshot drop-in (dispatch)', () => {
@@ -43,14 +39,12 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
   });
 
   test.afterEach(() => {
-    sinon.restore();
     // setupTest deletes percy.enabled, so the next healthcheck restores the server's real type —
-    // but reset here too so no in-process override leaks into non-dispatch tests.
+    // but reset here too so no in-process override leaks into other tests.
     utils.percy.type = 'web';
   });
 
-  test('web project routes toHaveScreenshot through percySnapshot and always passes', async ({ page }) => {
-    await withProjectType('web');
+  test('routes toHaveScreenshot (named + anonymous) through percySnapshot and always passes', async ({ page }) => {
     // The CLI testing server is shared across parallel workers and reset by every test's
     // setupTest — a read-back can race a concurrent reset. Retry the whole post+read block as a
     // unit; snapshot-name counters increment across retries, so match name families, not indices.
@@ -75,46 +69,31 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
     }).toPass({ timeout: 15000 });
   });
 
-  test('app project routes toHaveScreenshot through the raw-PNG comparison ingest', async ({ page }) => {
-    await withProjectType('app');
-    await expect(async () => {
-      await expect(page).toHaveScreenshot('dropin-app.png');
+  test('a non-web project token is a configuration error (like other SDKs)', async ({ page }) => {
+    // Pin the cached project type, then reset the run latch so validation re-runs.
+    await utils.isPercyEnabled();
+    utils.percy.type = 'automate';
+    _resetRunState();
 
-      const comparisons = await recorded('/percy/comparison');
-      const named = comparisons.find(c => /^dropin-app(-\d+)?$/.test(c.body.name));
-      expect(named, 'app project did not post a comparison').toBeTruthy();
-      expect(named.body.tag.width).toBe(page.viewportSize().width);
-      // percy-api requires a tag height; the drop-in parses it from the PNG bytes.
-      expect(named.body.tag.height).toBeGreaterThan(0);
-      expect(named.body.tiles.length).toBe(1);
-      expect(named.body.tiles[0].content.length).toBeGreaterThan(0);
-    }).toPass({ timeout: 15000 });
-  });
-
-  test('automate project routes toHaveScreenshot through percyScreenshot', async ({ page }) => {
-    await withProjectType('automate');
-    // percyScreenshot needs a live Automate session; stub the session boundary and assert the
-    // dispatch handed our derived snapshot name to the SDK's Automate flow.
-    sinon.stub(Utils, 'sessionDetails').resolves({ hashed_id: 'session-123' });
-    const captured = [];
-    sinon.stub(Utils, 'captureAutomateScreenshot').callsFake(async data => {
-      captured.push(data);
-      return { body: { data: {} } };
-    });
-
-    await expect(page).toHaveScreenshot('dropin-automate.png');
-
-    expect(captured.length).toBe(1);
-    expect(captured[0].snapshotName).toMatch(/^dropin-automate(-\d+)?$/);
-    expect(captured[0].sessionId).toBe('session-123');
-    expect(captured[0].framework).toBe('playwright');
+    try {
+      await expect(expect(page).toHaveScreenshot('dropin-wrong-token.png'))
+        .rejects.toThrow(/requires a web project token/);
+    } finally {
+      utils.percy.type = 'web';
+      _resetRunState();
+    }
   });
 
   test('a Percy upload error never fails the assertion (warn-and-continue)', async ({ page }) => {
-    await withProjectType('app');
-    await helpers.test('error', '/percy/comparison');
-    // Must still pass — a Percy problem can never red the functional suite.
-    await expect(page).toHaveScreenshot('dropin-error-path.png');
+    await helpers.test('error', '/percy/snapshot');
+    try {
+      // Must still pass — a Percy problem can never red the functional suite.
+      await expect(page).toHaveScreenshot('dropin-error-path.png');
+    } finally {
+      // The error flag lives on the SHARED testing server — clear it immediately so parallel
+      // workers posting real snapshots aren't starved for the rest of this test's slot.
+      await helpers.test('reset');
+    }
   });
 });
 
@@ -135,32 +114,6 @@ test.describe('drop-in units', () => {
     expect(paths.sanitizeDirentName('a/b')).toBe(null);
     expect(paths.sanitizeDirentName('a\\b')).toBe(null);
     expect(paths.sanitizeDirentName('')).toBe(null);
-  });
-
-  test('firstBuildBaseline seeds committed PNGs only when the server marked the build as baseline', async () => {
-    // Server said normal head → nothing seeded, discovery never runs.
-    const notFirst = await firstBuildBaseline({}, {
-      build: { id: '1', source: 'playwright-dropin' },
-      discoverBaselines: () => { throw new Error('must not discover'); }
-    });
-    expect(notFirst.outcome).toBe(OUTCOME.NOT_FIRST_BUILD);
-
-    // Server said baseline → committed PNGs are posted with PNG-derived tag dims.
-    const png = Buffer.alloc(24);
-    png.writeUInt32BE(0x49484452, 12);
-    png.writeUInt32BE(1280, 16);
-    png.writeUInt32BE(720, 20);
-    const posted = [];
-    const seeded = await firstBuildBaseline({ clientInfo: 'c', environmentInfo: 'e' }, {
-      build: { id: '9', source: BASELINE_SOURCE },
-      discoverBaselines: () => ({
-        baselines: [{ filepath: '/repo/a.png', name: 'home', browserFamily: 'chromium', width: 1280 }]
-      }),
-      readFile: async () => png,
-      postComparison: async options => posted.push(options)
-    });
-    expect(seeded.outcome).toBe(OUTCOME.SEEDED);
-    expect(posted[0].tag).toEqual({ name: 'chromium', browserName: 'chromium', width: 1280, height: 720 });
   });
 
   test('snapshotViaPercy delegates to the repo percySnapshot and scopes Locator subjects', async ({ page }) => {
@@ -184,5 +137,115 @@ test.describe('drop-in units', () => {
     expect(receivedArgs.options.widths).toEqual([900]);
     expect(receivedArgs.options.minHeight).toBe(page.viewportSize().height);
     expect(receivedArgs.options.sync).toBe(true);
+  });
+});
+
+test.describe('baseline provider (CLI seeding contract)', () => {
+  let tmpDir;
+
+  // A minimal committed-baseline repo: one `*-snapshots` dir with a valid 1280x720 PNG header.
+  function makePng(width = 1280, height = 720) {
+    const buf = Buffer.alloc(24);
+    buf.writeUInt32BE(0x49484452, 12); // IHDR
+    buf.writeUInt32BE(width, 16);
+    buf.writeUInt32BE(height, 20);
+    return buf;
+  }
+
+  test.beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'percy-dropin-provider-'));
+    const snapsDir = path.join(tmpDir, 'example.spec.ts-snapshots');
+    fs.mkdirSync(snapsDir, { recursive: true });
+    fs.writeFileSync(path.join(snapsDir, 'home-chromium-darwin.png'), makePng());
+  });
+
+  test.afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const RESOLVED_CONFIG = {
+    rootDir: null, // set per test
+    projects: [{ name: 'chromium', use: { browserName: 'chromium', viewport: { width: 1280, height: 720 } } }]
+  };
+
+  test('discovers committed baselines with identity + PNG-derived height', async () => {
+    const result = await provider.discoverBaselines({ cwd: tmpDir }, {
+      resolveConfig: () => ({ ...RESOLVED_CONFIG, rootDir: tmpDir })
+    });
+
+    expect(result.degraded).toBeFalsy();
+    expect(result.baselines.length).toBe(1);
+    expect(result.baselines[0]).toEqual(expect.objectContaining({
+      name: 'home',
+      browserFamily: 'chromium',
+      width: 1280,
+      height: 720
+    }));
+    expect(result.baselines[0].filepath.endsWith('home-chromium-darwin.png')).toBe(true);
+  });
+
+  test('degrades when the Playwright config cannot be resolved', async () => {
+    const result = await provider.discoverBaselines({ cwd: tmpDir }, {
+      resolveConfig: () => null
+    });
+
+    expect(result.degraded).toBe(true);
+    expect(result.reason).toBe('playwright_config_unresolvable');
+    expect(result.baselines).toEqual([]);
+  });
+
+  test('exposes the head-build source tag', () => {
+    expect(provider.buildSource).toBe('playwright-dropin');
+  });
+
+  test('resolvePlaywrightConfig round-trips the reporter-written file and cleans up', () => {
+    let writtenTo = null;
+    const config = resolvePlaywrightConfig({
+      cwd: tmpDir,
+      spawn: (cmd, args, opts) => {
+        // Stand-in for `npx playwright test --list`: write the file like the reporter would.
+        writtenTo = opts.env.PERCY_PW_CONFIG_OUT;
+        fs.writeFileSync(writtenTo, JSON.stringify({ rootDir: tmpDir, projects: [] }));
+        return { status: 0 };
+      }
+    });
+
+    expect(config).toEqual({ rootDir: tmpDir, projects: [] });
+    expect(fs.existsSync(writtenTo), 'temp config file must be cleaned up').toBe(false);
+  });
+
+  test('resolvePlaywrightConfig returns null when playwright never writes the file', () => {
+    const config = resolvePlaywrightConfig({
+      cwd: tmpDir,
+      spawn: () => ({ status: 1, stderr: 'no playwright here' })
+    });
+    expect(config).toBe(null);
+  });
+
+  test('the config reporter serializes the minimal resolved shape', () => {
+    const out = path.join(tmpDir, 'reporter-out.json');
+    process.env.PERCY_PW_CONFIG_OUT = out;
+    try {
+      new ConfigReporter().onBegin({
+        rootDir: tmpDir,
+        projects: [{
+          name: 'chromium',
+          use: { browserName: 'chromium', viewport: { width: 1280, height: 720 }, headless: true },
+          snapshotPathTemplate: undefined
+        }]
+      });
+    } finally {
+      delete process.env.PERCY_PW_CONFIG_OUT;
+    }
+
+    const shape = JSON.parse(fs.readFileSync(out, 'utf8'));
+    expect(shape.rootDir).toBe(tmpDir);
+    expect(shape.projects[0].use).toEqual({
+      browserName: 'chromium',
+      viewport: { width: 1280, height: 720 }
+    });
+    // Only the fields identity reconstruction needs — nothing else leaks through (undefined
+    // template/expect fields are dropped by JSON serialization).
+    expect(Object.keys(shape.projects[0]).sort()).toEqual(['name', 'use']);
   });
 });

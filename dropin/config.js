@@ -96,6 +96,20 @@ function loadConfig({ rootDir = process.cwd(), force = false } = {}) {
 // globalSetup). Throws a clear error on a rejected combination so the user fixes their config rather
 // than silently getting the wrong behaviour. Returns the validated config.
 async function validateConfig(config = loadConfig(), { token = process.env.PERCY_TOKEN, probe } = {}) {
+  // WEB-ONLY: the drop-in always takes serialized-DOM web snapshots (Percy renders server-side).
+  // An app/automate token is a configuration error the user must fix — same posture as the other
+  // SDKs' wrong-token errors. `percy.type` is populated by the isPercyEnabled() healthcheck that
+  // always precedes validation.
+  const projectType = utils.percy && utils.percy.type;
+  if (projectType && projectType !== 'web') {
+    throw new Error(
+      `Percy Playwright drop-in requires a web project token — the configured token is for ${
+        projectType === 'automate' ? 'a Percy on Automate' : `an "${projectType}"`
+      } project. Use a web project token, or use percySnapshot()/percyScreenshot() directly ` +
+      'for non-web projects.'
+    );
+  }
+
   // Determine which throw-modes are active. always-pass is the DEFAULT posture; sync (global) and
   // compat (file) are deliberate overrides that implicitly supersede the default always-pass.
   // A conflict is rejected when MORE THAN ONE mode is deliberately chosen — i.e. sync+compat, or an
@@ -163,27 +177,13 @@ function assertSyncEngaged(config = loadConfig()) {
   return true;
 }
 
-// Capture-flow dispatch — the override delegates to the SDK flow that matches the Percy PROJECT
-// TYPE (the CLI healthcheck's `percy.type`, derived from the token). No user config involved:
-//   • 'web' (and legacy/unknown tokens) → 'snapshot'  — percySnapshot's serialized-DOM flow,
-//     rendered server-side by Percy.
-//   • 'automate'                        → 'automate'  — percyScreenshot (Percy on Automate).
-//   • 'app' / 'generic' (anything else) → 'screenshot' — raw-PNG upload through the comparison
-//     ingest (the only screenshot path those projects accept; percyScreenshot is Automate-only).
-function captureFlowFor(type = utils.percy && utils.percy.type) {
-  if (type === 'automate') return 'automate';
-  if (type == null || type === 'web') return 'snapshot';
-  return 'screenshot';
-}
-
 // Status line (plan §User-Facing States "Mode status line").
 function modeStatusLine(config = loadConfig()) {
   let mode = 'async-always-pass';
   if (config.sync) mode = 'sync';
   else if (config.compat) mode = 'compat';
   const gate = config.sync ? 'fail-on-changes' : config.gate;
-  const type = (utils.percy && utils.percy.type) || 'web';
-  return `Percy drop-in: mode=${mode} | capture=${captureFlowFor(type)} (auto: ${type} project) | gate=${gate}`;
+  return `Percy drop-in: mode=${mode} | capture=snapshot (web) | gate=${gate}`;
 }
 
 function _reset() { _cache = null; }
@@ -193,7 +193,6 @@ module.exports = {
   validateConfig,
   assertSyncEngaged,
   modeStatusLine,
-  captureFlowFor,
   readConfigFile,
   deferredUploadSet,
   DEFAULTS,

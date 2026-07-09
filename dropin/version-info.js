@@ -1,8 +1,8 @@
 'use strict';
 
-// Shared client/environment-info strings sent on every Percy post (postComparison clientInfo /
-// environmentInfo). Computed once and reused so index.js and global-setup.js don't each recompute
-// the identical pkg-name/version + playwright-version lookup.
+// Shared client/environment-info strings sent on every Percy post (clientInfo /
+// environmentInfo). Computed once and reused across the drop-in modules so they don't each
+// recompute the identical pkg-name/version + playwright-version lookup.
 const pkg = require('../package.json');
 
 // `@percy/playwright/<version>` — identifies this SDK to Percy. Drop-in traffic is additionally

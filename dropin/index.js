@@ -5,16 +5,18 @@
 // the override globally (Q3-proven: applies to tests importing `expect` straight from
 // @playwright/test).
 //
-// Capture dispatch is AUTOMATIC, by the Percy PROJECT TYPE (config.js captureFlowFor — the CLI
-// healthcheck's `percy.type`), delegating to the SDK flows that already exist in ../index.js:
-//   • web      → percySnapshot's serialized-DOM flow (dom.js seam adds Locator scoping).
-//   • automate → percyScreenshot (Percy on Automate).
-//   • app/generic → raw-PNG upload through the EXISTING postComparison ingest (KD3 — web-shaped
-//     tag + base64 content tile; capture.js owns the pixel capture, the only piece the root SDK
-//     doesn't already have).
+// The drop-in is WEB-ONLY: every assertion becomes a Percy web snapshot — the SDK's own
+// `percySnapshot` serialized-DOM flow (dom.js seam adds Locator scoping), rendered server-side.
+// An app/automate token is a CONFIGURATION error (validateConfig throws, like other SDKs'
+// wrong-token errors); use percySnapshot/percyScreenshot directly for those projects.
+//
+// Baseline seeding is CLI-DRIVEN and never happens in-process here: `percy exec` uploads the
+// committed Playwright PNGs as an auto-approved build #1 on an empty project (before any test
+// runs), and `percy playwright:setup-baseline` does the same explicitly on established projects
+// (see dropin/baseline/provider.js + commands/setup-baseline.mjs).
 //
 // Behaviour (per plan):
-//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seams (KD4): the flows return data;
+//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seam (KD4): the flow returns data;
 //     index.js decides whether to pass/throw based on the active mode:
 //       - async always-pass (D6, default): never throw; verdict deferred to Percy review.
 //       - compat (D6/KD5): run the NATIVE matcher's throw semantics (missing-baseline suppressed).
@@ -26,15 +28,13 @@
 // The three modes are MUTUALLY EXCLUSIVE and resolved at config-load (Unit 7 / src/config.js).
 const { expect: baseExpect, test } = require('@playwright/test');
 const utils = require('@percy/sdk-utils');
-const { captureFullOverride } = require('./capture');
-const { snapshotViaPercy, resolvePageAndLocator } = require('./dom');
+const { snapshotViaPercy } = require('./dom');
 const { deriveIdentity } = require('./identity');
 const fallback = require('./fallback');
 const { classifySyncResult } = require('./sync');
-const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine, captureFlowFor } = require('./config');
+const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine } = require('./config');
 
 const { CLIENT_INFO, ENV_INFO } = require('./version-info');
-const { pngDimensions } = require('./png');
 const log = utils.logger('playwright-dropin');
 
 // Capture Playwright's ORIGINAL toHaveScreenshot BEFORE we override the slot — the native-fallback
@@ -53,12 +53,14 @@ function currentTestInfo() {
   try { return test.info(); } catch { return null; }
 }
 
-// First-build detection for the sync classifier (KD7). The globalSetup seed (Unit 4b) sets
-// PERCY_DROPIN_FIRST_BUILD when it establishes the project's first baseline → the head this run is
-// build #1, whose diffs are baseline-establishment noise. The reporter (Gate A) does the
-// authoritative post-finish detection via the build's base-build relationship.
+// First-build detection for the sync classifier (KD7). With no committed baselines the head run
+// itself becomes the project's baseline: `percy exec` sends the baseline-candidate flag and the
+// API rewrites the build's source iff it is the project's first build. The CLI exposes the decided
+// source through the healthcheck build info — when this run's build IS the baseline, its diffs are
+// baseline-establishment noise. The reporter (Gate A) does the authoritative post-finish detection.
 function isFirstBuildRun() {
-  return process.env.PERCY_DROPIN_FIRST_BUILD === '1';
+  return Boolean(utils.percy && utils.percy.build &&
+    utils.percy.build.source === 'playwright-dropin-baseline');
 }
 
 // Run-level native-fallback latch (D7/KD6). isPercyEnabled() is checked once at the FIRST assertion;
@@ -99,30 +101,6 @@ async function resolveRunMode(config) {
 // unit tests in-process need to flip run state between cases).
 function _resetRunState() { _runMode = null; _validated = false; fallback._resetNotice(); }
 
-// Build the postComparison options for a captured tile. `sync` is added only in sync mode so the
-// CLI awaits the per-comparison verdict (it also honours percy.config.snapshot.sync server-side).
-function comparisonOptions({ name, browserFamily, width, pngBuffer, sync }) {
-  // percy-api requires tag height (screenshot records validate presence); width stays the
-  // IDENTITY width (viewport) so baseline↔head pairing is stable, height comes from the actual
-  // PNG bytes (accurate for both page and element captures).
-  const dims = pngDimensions(pngBuffer);
-  const options = {
-    name,
-    clientInfo: CLIENT_INFO,
-    environmentInfo: ENV_INFO,
-    tag: { name: browserFamily, browserName: browserFamily, width, height: dims && dims.height },
-    tiles: [{ content: pngBuffer.toString('base64') }]
-  };
-  if (sync) options.sync = true;
-  return options;
-}
-
-// Lazy-required at dispatch time for the same CJS↔ESM interop reason as dom.js: the root module
-// may be mid-load when the drop-in entry is evaluated (specs import both as ESM).
-function rootPercyScreenshot(...args) {
-  return require('../index.js').percyScreenshot(...args);
-}
-
 const percyMatchers = {
   async toHaveScreenshot(pageOrLocator, nameOrOptions, maybeOptions) {
     const config = loadConfig();
@@ -144,66 +122,20 @@ const percyMatchers = {
         return { pass: true, message: () => 'Percy is disabled — snapshot skipped' };
       }
 
-      // First-build-as-baseline: globalSetup seeded the committed snapshot PNGs as this build's
-      // content, so live captures must NOT be posted on top — the auto-approved baseline is
-      // exactly the blessed repo PNGs. The assertion still passes (always-pass posture).
-      if (process.env.PERCY_DROPIN_SEEDED_BASELINE === '1') {
-        return {
-          pass: true,
-          message: () => 'Percy: first build — baseline established from committed snapshots; live capture skipped'
-        };
-      }
-
       const nameArg = typeof nameOrOptions === 'string' || Array.isArray(nameOrOptions) ? nameOrOptions : undefined;
       const options = (typeof nameOrOptions === 'object' && !Array.isArray(nameOrOptions) ? nameOrOptions : maybeOptions) || {};
 
       const { name, browserFamily, width } = deriveIdentity(pageOrLocator, nameArg, currentTestInfo());
 
-      // Automatic dispatch by Percy project type (utils.percy.type, cached by the
-      // isPercyEnabled() above) — delegate to the SDK flow the project actually accepts.
-      const flow = captureFlowFor();
-
-      if (flow === 'snapshot') {
-        // WEB project — the SDK's own percySnapshot (serialized DOM, server-side render), via the
-        // dom.js seam that adds Locator scoping + viewport identity pinning. percySnapshot
-        // swallows its own errors and returns the postSnapshot data; an undefined result in sync
-        // mode lands in the classifier's no-verdict bucket (never a false-green — the gate
-        // backstops).
-        const response = await snapshotViaPercy(pageOrLocator, name, { width, sync: config.sync }, options);
-        if (config.sync) {
-          assertSyncEngaged(config);
-          syncResult = response;
-        }
-      } else if (flow === 'automate') {
-        // AUTOMATE project — the SDK's own percyScreenshot (Percy on Automate). The remote session
-        // captures the full screen; Locator scoping has no equivalent there.
-        const { page, locator } = resolvePageAndLocator(pageOrLocator);
-        if (locator) {
-          log.debug('Percy: Automate screenshots capture the session screen — Locator scoping is ignored');
-        }
-        const data = await rootPercyScreenshot(page, name, config.sync ? { sync: true } : undefined);
-        if (config.sync) {
-          assertSyncEngaged(config);
-          syncResult = data;
-        }
-      } else {
-        // APP/GENERIC project — screenshot/BYOS (capture.js seam): upload the pre-rendered PNG.
-        const pngBuffer = await captureFullOverride(pageOrLocator, options);
-        const postOptions = comparisonOptions({ name, browserFamily, width, pngBuffer, sync: config.sync });
-
-        // KD3 reuse: the existing /percy/comparison ingest accepts a web-shaped tag + inline content
-        // tile. In sync mode postComparison returns the per-comparison verdict; otherwise we
-        // retry-on-blip (D7 mid-run) and never go native inside a live run.
-        if (config.sync) {
-          // Sync mode: a missing verdict must still red CI via the Gate-A backstop, so the post here
-          // is NOT wrapped in retryablePost's swallow — the classifier owns the {error} bucket.
-          syncResult = await utils.postComparison(postOptions);
-          // Runtime guard: assert sync actually engaged (a deferred-upload that slipped in at runtime
-          // would silently turn sync into a no-op). Surfaces loudly; the gate still backstops.
-          assertSyncEngaged(config);
-        } else {
-          await fallback.retryablePost(() => utils.postComparison(postOptions));
-        }
+      // WEB-ONLY: every assertion is the SDK's own percySnapshot (serialized DOM, server-side
+      // render), via the dom.js seam that adds Locator scoping + viewport identity pinning.
+      // percySnapshot swallows its own errors and returns the postSnapshot data; an undefined
+      // result in sync mode lands in the classifier's no-verdict bucket (never a false-green —
+      // the gate backstops). A non-web token never reaches here — validateConfig throws.
+      const response = await snapshotViaPercy(pageOrLocator, name, { width, sync: config.sync }, options);
+      if (config.sync) {
+        assertSyncEngaged(config);
+        syncResult = response;
       }
 
       // (3) Sync mode (D10/KD14): apply the 3-way classifier ABOVE the capture seam. First-build
@@ -253,17 +185,12 @@ if (metaSym) {
     'If snapshots do not appear in Percy, this Playwright version is unsupported.');
 }
 
-// Unit 4b — the first-build baseline seed (the bet). Exposed so a consumer can either point
-// `globalSetup` at the package's `/global-setup` entry, or call this from their own globalSetup.
-const baselineGlobalSetup = require('./global-setup');
-
 // Unit 5 — the opt-in gate reporter, exposed for one-line wiring in playwright.config `reporter`.
 const PercyGateReporter = require('./reporter');
 
 module.exports = {
   CLIENT_INFO,
   ENV_INFO,
-  baselineGlobalSetup,
   PercyGateReporter,
   _resetRunState,
   nativeMatcher
