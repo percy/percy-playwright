@@ -361,15 +361,19 @@ test.describe('percySnapshot', () => {
   });
 
   test('posts snapshots to percy server with responsiveSnapshotCapture false', async ({ page }) => {
-    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: false, widths: [1280] });
-    
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/)
-    ]));
+    // The shared testing server's log store is wiped by parallel workers' resets — retry the
+    // post+read block as a unit (same guard as 'posts snapshots to the local percy server').
+    await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: false, widths: [1280] });
+
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/)
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('posts snapshots to percy server with responsiveSnapshotCapture with mobile', async ({ page }) => {

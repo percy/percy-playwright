@@ -77,13 +77,18 @@ module.exports = defineConfig({ /* your config */ });
 PERCY_TOKEN=<web-project-token> npx percy exec -- npx playwright test
 ```
 
-Just the standard `percy exec` — no wrapper, no extra flags. Every `toHaveScreenshot()` becomes a
-Percy **web snapshot**: the live page is serialized with the same capture `percySnapshot()` uses
-(readiness gate, responsive capture, cross-origin iframes) and Percy renders it server-side;
-Locator subjects become element-scoped snapshots. The assertion **always passes locally** — the
-visual verdict moves to Percy's review UI, and a missing/invalid token or any Percy error **never
-fails your suite** (the whole run falls back to native `toHaveScreenshot`). The drop-in requires a
-**web** project token; an app/automate token raises a clear configuration error.
+Just the standard `percy exec` — no wrapper, no extra flags. Capture dispatches automatically by
+your **project token**:
+
+| Project | Flow |
+|---|---|
+| **Web** | Every `toHaveScreenshot()` becomes a Percy web snapshot: the live page is serialized with the same capture `percySnapshot()` uses (readiness gate, responsive capture, cross-origin iframes) and Percy renders it server-side. Locator subjects become element-scoped snapshots. |
+| **App** | The captured PNG uploads straight through the comparison ingest — no render flow, exactly how App Percy ingests screenshots. |
+| anything else | A clear wrong-token configuration error (use `percyScreenshot()` for Automate). |
+
+The assertion **always passes locally** — the visual verdict moves to Percy's review UI, and a
+missing/invalid token or any Percy error **never fails your suite** (the whole run falls back to
+native `toHaveScreenshot`).
 
 ### Your committed baselines become the first build — automatically
 

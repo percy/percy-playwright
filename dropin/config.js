@@ -96,17 +96,17 @@ function loadConfig({ rootDir = process.cwd(), force = false } = {}) {
 // globalSetup). Throws a clear error on a rejected combination so the user fixes their config rather
 // than silently getting the wrong behaviour. Returns the validated config.
 async function validateConfig(config = loadConfig(), { token = process.env.PERCY_TOKEN, probe } = {}) {
-  // WEB-ONLY: the drop-in always takes serialized-DOM web snapshots (Percy renders server-side).
-  // An app/automate token is a configuration error the user must fix — same posture as the other
-  // SDKs' wrong-token errors. `percy.type` is populated by the isPercyEnabled() healthcheck that
-  // always precedes validation.
+  // The drop-in supports WEB projects (serialized-DOM snapshots, rendered server-side) and APP
+  // projects (raw screenshot upload through the comparison ingest — no render flow, like App
+  // Percy). Any other token is a configuration error the user must fix — same posture as the
+  // other SDKs' wrong-token errors. `percy.type` is populated by the isPercyEnabled()
+  // healthcheck that always precedes validation.
   const projectType = utils.percy && utils.percy.type;
-  if (projectType && projectType !== 'web') {
+  if (projectType && projectType !== 'web' && projectType !== 'app') {
     throw new Error(
-      `Percy Playwright drop-in requires a web project token — the configured token is for ${
-        projectType === 'automate' ? 'a Percy on Automate' : `an "${projectType}"`
-      } project. Use a web project token, or use percySnapshot()/percyScreenshot() directly ` +
-      'for non-web projects.'
+      `Percy Playwright drop-in requires a web or app project token — the configured token is ${
+        projectType === 'automate' ? 'for a Percy on Automate' : `for a "${projectType}"`
+      } project. Use a web/app project token, or use percyScreenshot() directly for Automate.`
     );
   }
 
@@ -183,7 +183,9 @@ function modeStatusLine(config = loadConfig()) {
   if (config.sync) mode = 'sync';
   else if (config.compat) mode = 'compat';
   const gate = config.sync ? 'fail-on-changes' : config.gate;
-  return `Percy drop-in: mode=${mode} | capture=snapshot (web) | gate=${gate}`;
+  const type = (utils.percy && utils.percy.type) || 'web';
+  const capture = type === 'app' ? 'screenshot (app)' : 'snapshot (web)';
+  return `Percy drop-in: mode=${mode} | capture=${capture} | gate=${gate}`;
 }
 
 function _reset() { _cache = null; }

@@ -6,8 +6,9 @@
 // Playwright's extend() guard makes possible) leaves the suite green with zero Percy traffic, so
 // these tests must fail loudly if nothing was posted.
 //
-// The drop-in is WEB-ONLY: every assertion is a percySnapshot web snapshot (the testing server
-// reports type 'web' — the token-less default). A non-web token is a configuration error.
+// Dispatch is automatic by project type: web → percySnapshot web snapshot (the testing server
+// reports type 'web' — the token-less default); app → raw-PNG comparison upload (no render
+// flow); anything else (automate, ...) is a configuration error.
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -69,7 +70,30 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
     }).toPass({ timeout: 15000 });
   });
 
-  test('a non-web project token is a configuration error (like other SDKs)', async ({ page }) => {
+  test('an app project routes toHaveScreenshot through the raw-PNG comparison ingest', async ({ page }) => {
+    // Pin the cached project type (the matcher re-reads it per assertion).
+    await utils.isPercyEnabled();
+    utils.percy.type = 'app';
+
+    try {
+      await expect(async () => {
+        await expect(page).toHaveScreenshot('dropin-app.png');
+
+        const comparisons = await recorded('/percy/comparison');
+        const named = comparisons.find(c => /^dropin-app(-\d+)?$/.test(c.body.name));
+        expect(named, 'app project did not post a comparison').toBeTruthy();
+        expect(named.body.tag.width).toBe(page.viewportSize().width);
+        // percy-api requires a tag height; the drop-in parses it from the PNG bytes.
+        expect(named.body.tag.height).toBeGreaterThan(0);
+        expect(named.body.tiles.length).toBe(1);
+        expect(named.body.tiles[0].content.length).toBeGreaterThan(0);
+      }).toPass({ timeout: 15000 });
+    } finally {
+      utils.percy.type = 'web';
+    }
+  });
+
+  test('an automate token is a configuration error (like other SDKs)', async ({ page }) => {
     // Pin the cached project type, then reset the run latch so validation re-runs.
     await utils.isPercyEnabled();
     utils.percy.type = 'automate';
@@ -77,7 +101,7 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
 
     try {
       await expect(expect(page).toHaveScreenshot('dropin-wrong-token.png'))
-        .rejects.toThrow(/requires a web project token/);
+        .rejects.toThrow(/requires a web or app project token/);
     } finally {
       utils.percy.type = 'web';
       _resetRunState();

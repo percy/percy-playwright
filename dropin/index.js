@@ -5,10 +5,14 @@
 // the override globally (Q3-proven: applies to tests importing `expect` straight from
 // @playwright/test).
 //
-// The drop-in is WEB-ONLY: every assertion becomes a Percy web snapshot — the SDK's own
-// `percySnapshot` serialized-DOM flow (dom.js seam adds Locator scoping), rendered server-side.
-// An app/automate token is a CONFIGURATION error (validateConfig throws, like other SDKs'
-// wrong-token errors); use percySnapshot/percyScreenshot directly for those projects.
+// Capture dispatch is AUTOMATIC, by the Percy PROJECT TYPE (the token):
+//   • WEB project → the SDK's own `percySnapshot` serialized-DOM flow (dom.js seam adds Locator
+//     scoping), rendered server-side by Percy's pipeline.
+//   • APP project → the captured PNG uploads straight through the comparison ingest — no render
+//     flow is triggered, exactly how App Percy ingests screenshots today (capture.js owns the
+//     pixel capture).
+//   • Any other token (automate, generic, ...) is a CONFIGURATION error (validateConfig throws,
+//     like other SDKs' wrong-token errors).
 //
 // Baseline seeding is CLI-DRIVEN and never happens in-process here: `percy exec` uploads the
 // committed Playwright PNGs as an auto-approved build #1 on an empty project (before any test
@@ -28,6 +32,7 @@
 // The three modes are MUTUALLY EXCLUSIVE and resolved at config-load (Unit 7 / src/config.js).
 const { expect: baseExpect, test } = require('@playwright/test');
 const utils = require('@percy/sdk-utils');
+const { captureFullOverride } = require('./capture');
 const { snapshotViaPercy } = require('./dom');
 const { deriveIdentity } = require('./identity');
 const fallback = require('./fallback');
@@ -35,6 +40,7 @@ const { classifySyncResult } = require('./sync');
 const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine } = require('./config');
 
 const { CLIENT_INFO, ENV_INFO } = require('./version-info');
+const { pngDimensions } = require('./png');
 const log = utils.logger('playwright-dropin');
 
 // Capture Playwright's ORIGINAL toHaveScreenshot BEFORE we override the slot — the native-fallback
@@ -101,6 +107,24 @@ async function resolveRunMode(config) {
 // unit tests in-process need to flip run state between cases).
 function _resetRunState() { _runMode = null; _validated = false; fallback._resetNotice(); }
 
+// Build the postComparison options for a captured tile (APP projects). `sync` is added only in
+// sync mode so the CLI awaits the per-comparison verdict.
+function comparisonOptions({ name, browserFamily, width, pngBuffer, sync }) {
+  // percy-api requires tag height (screenshot records validate presence); width stays the
+  // IDENTITY width (viewport) so baseline↔head pairing is stable, height comes from the actual
+  // PNG bytes (accurate for both page and element captures).
+  const dims = pngDimensions(pngBuffer);
+  const options = {
+    name,
+    clientInfo: CLIENT_INFO,
+    environmentInfo: ENV_INFO,
+    tag: { name: browserFamily, browserName: browserFamily, width, height: dims && dims.height },
+    tiles: [{ content: pngBuffer.toString('base64') }]
+  };
+  if (sync) options.sync = true;
+  return options;
+}
+
 const percyMatchers = {
   async toHaveScreenshot(pageOrLocator, nameOrOptions, maybeOptions) {
     const config = loadConfig();
@@ -127,15 +151,35 @@ const percyMatchers = {
 
       const { name, browserFamily, width } = deriveIdentity(pageOrLocator, nameArg, currentTestInfo());
 
-      // WEB-ONLY: every assertion is the SDK's own percySnapshot (serialized DOM, server-side
-      // render), via the dom.js seam that adds Locator scoping + viewport identity pinning.
-      // percySnapshot swallows its own errors and returns the postSnapshot data; an undefined
-      // result in sync mode lands in the classifier's no-verdict bucket (never a false-green —
-      // the gate backstops). A non-web token never reaches here — validateConfig throws.
-      const response = await snapshotViaPercy(pageOrLocator, name, { width, sync: config.sync }, options);
-      if (config.sync) {
-        assertSyncEngaged(config);
-        syncResult = response;
+      // Automatic dispatch by project type (validateConfig has already rejected anything that is
+      // neither web nor app, so this is a clean two-way switch).
+      if (((utils.percy && utils.percy.type) || 'web') === 'app') {
+        // APP project — upload the captured PNG straight through the comparison ingest; no render
+        // flow is triggered server-side (exactly how App Percy ingests screenshots).
+        const pngBuffer = await captureFullOverride(pageOrLocator, options);
+        const postOptions = comparisonOptions({ name, browserFamily, width, pngBuffer, sync: config.sync });
+
+        if (config.sync) {
+          // Sync mode: a missing verdict must still red CI via the Gate-A backstop, so the post
+          // here is NOT wrapped in retryablePost's swallow — the classifier owns the {error}
+          // bucket. Runtime guard: assert sync actually engaged (a deferred-upload that slipped
+          // in at runtime would silently turn sync into a no-op).
+          syncResult = await utils.postComparison(postOptions);
+          assertSyncEngaged(config);
+        } else {
+          await fallback.retryablePost(() => utils.postComparison(postOptions));
+        }
+      } else {
+        // WEB project — the SDK's own percySnapshot (serialized DOM, server-side render), via the
+        // dom.js seam that adds Locator scoping + viewport identity pinning. percySnapshot
+        // swallows its own errors and returns the postSnapshot data; an undefined result in sync
+        // mode lands in the classifier's no-verdict bucket (never a false-green — the gate
+        // backstops).
+        const response = await snapshotViaPercy(pageOrLocator, name, { width, sync: config.sync }, options);
+        if (config.sync) {
+          assertSyncEngaged(config);
+          syncResult = response;
+        }
       }
 
       // (3) Sync mode (D10/KD14): apply the 3-way classifier ABOVE the capture seam. First-build

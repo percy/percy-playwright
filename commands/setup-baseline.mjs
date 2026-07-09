@@ -27,9 +27,12 @@ export const setupBaseline = command('setup-baseline', {
 }, async function*({ percy, log, exit }) {
   if (!percy) exit(1, 'Percy is disabled');
 
-  if (percy.client.tokenType() !== 'web') {
-    exit(1, 'playwright:setup-baseline requires a Percy web project token — ' +
-      `the configured token is for a "${percy.client.tokenType()}" project.`);
+  // Web projects seed rendered snapshots; app projects seed raw comparison uploads (no render
+  // flow — like App Percy). Anything else is a wrong token.
+  let projectType = percy.client.tokenType();
+  if (projectType !== 'web' && projectType !== 'app') {
+    exit(1, 'playwright:setup-baseline requires a Percy web or app project token — ' +
+      `the configured token is for a "${projectType}" project.`);
   }
 
   // The provider owns all Playwright knowledge (config resolution, snapshot discovery, identity
@@ -53,13 +56,13 @@ export const setupBaseline = command('setup-baseline', {
   log.info(`Uploading ${baselines.length} committed baseline snapshot(s) as the project baseline...`);
 
   let res = await percy.client.createBuild({
-    projectType: 'web',
+    projectType,
     source: BASELINE_SOURCE,
     dropinBaselineSetup: true
   });
 
   let buildId = res.data.id;
-  let seeded = await uploadBaselines(percy.client, buildId, baselines, { log });
+  let seeded = await uploadBaselines(percy.client, buildId, baselines, { log, projectType });
   await percy.client.finalizeBuild(buildId);
 
   if (!seeded) exit(1, 'No baseline snapshots could be uploaded.');
