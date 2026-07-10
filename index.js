@@ -398,16 +398,8 @@ async function captureResponsiveDOM(page, options, percyDOM) {
 
   // Calculate default height for non-mobile widths
   let defaultHeight = currentHeight;
-  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true') {
-    if (options.minHeight) {
-      defaultHeight = options.minHeight;
-    } else {
-      const configMinHeight = utils.percy?.config?.snapshot?.minHeight;
-      /* istanbul ignore else: CLI always provides default value for config.snapshot */
-      if (configMinHeight) {
-        defaultHeight = configMinHeight;
-      }
-    }
+  if (process.env.PERCY_RESPONSIVE_CAPTURE_MIN_HEIGHT?.toLowerCase() === 'true' && options.minHeight) {
+    defaultHeight = options.minHeight;
   }
 
   // Get width and height combinations
@@ -415,7 +407,7 @@ async function captureResponsiveDOM(page, options, percyDOM) {
   if (!utils.getResponsiveWidths) {
     throw new Error('Update Percy CLI to the latest version to use responsiveSnapshotCapture');
   }
-  const widthHeights = await utils.getResponsiveWidths(options.widths || []);
+  const widthHeights = await utils.getResponsiveWidths(options.widths);
 
   try {
     for (let { width, height } of widthHeights) {
@@ -474,11 +466,13 @@ const percySnapshot = async function(page, name, options) {
     const percyDOM = await utils.fetchPercyDOM();
     await page.evaluate(percyDOM);
 
+    // Merge .percy.yml config options with snapshot options (snapshot options take priority)
+    const mergedOptions = utils.mergeSnapshotOptions(options);
     // Expose closed shadow roots via CDP before serialization so
     // PercyDOM.serialize() can access them through the WeakMap
     await exposeClosedShadowRoots(page);
 
-    let domSnapshot = await captureDOM(page, options || {}, percyDOM);
+    let domSnapshot = await captureDOM(page, mergedOptions, percyDOM);
 
     // Post the DOM to the snapshot endpoint with snapshot options and other info
     const response = await utils.postSnapshot({
