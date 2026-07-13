@@ -29,7 +29,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "tag": "beta"
+    "tag": "latest"
   },
   "peerDependencies": {
     "playwright-core": ">=1"
