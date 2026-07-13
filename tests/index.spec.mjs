@@ -58,6 +58,22 @@ test.describe('percySnapshot', () => {
     ]));
   });
 
+  test('posts snapshots when config.snapshot is undefined', async ({ page }) => {
+    await percySnapshot(page, 'Snapshot 1');
+
+    const savedConfig = utils.percy.config;
+    utils.percy.config = { ...savedConfig, snapshot: undefined };
+
+    await percySnapshot(page, 'Snapshot without config');
+
+    utils.percy.config = savedConfig;
+
+    const logs = await helpers.get('logs');
+    expect(logs).toEqual(expect.arrayContaining([
+      'Snapshot found: Snapshot without config'
+    ]));
+  });
+
   test('posts snapshots to the local percy server', async ({ page }) => {
     // The CLI testing server's log store is shared across parallel workers and wiped by every
     // test's setupTest — a read-back can race a concurrent reset. Retry the post+read block as a
