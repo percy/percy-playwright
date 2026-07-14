@@ -7,6 +7,9 @@
 // hatch. Zero-config works WITHOUT a file — the file only overrides defaults.
 //
 // Fields (drop-in only — NOT sync):
+//   • enabled: boolean (default true) — false makes toHaveScreenshot() PURE NATIVE (no Percy
+//     post, no missing-baseline suppression) while percySnapshot()/percyScreenshot() keep
+//     working under `percy exec`. Env override: PERCY_DROPIN_DISABLE=true.
 //   • gate:    'informational' (default) | 'fail-on-changes'   (Unit 5)
 //   • compat:  boolean — preserve native throw semantics (Unit 6 / D6)
 //   • fallback: boolean (default true) — native fallback when Percy is disabled at run start (D7)
@@ -29,6 +32,7 @@ const log = utils.logger('playwright-dropin');
 const CONFIG_FILENAMES = ['.percy-playwright-dropin.js', '.percy-playwright-dropin.json', 'percy-playwright-dropin.config.js'];
 
 const DEFAULTS = Object.freeze({
+  enabled: true,
   gate: 'informational',
   compat: false,
   fallback: true,
@@ -82,6 +86,10 @@ function loadConfig({ rootDir = process.cwd(), force = false } = {}) {
   // Track which throw-mode fields the user set explicitly (vs the default). Used by validateConfig
   // to distinguish a deliberate conflict from the implicit always-pass default.
   merged._explicit = explicit;
+
+  // CI-friendly kill switch: the env override beats the file, so a run can opt out of the
+  // override without editing config (e.g. bisecting whether the drop-in affects a suite).
+  if (process.env.PERCY_DROPIN_DISABLE === 'true') merged.enabled = false;
 
   // sync comes from the global .percy.yml (never the file). When sync is on, the always-pass posture
   // is implicitly off (sync owns the throw decision) — but we DON'T silently flip the user's

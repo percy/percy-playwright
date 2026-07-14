@@ -118,6 +118,14 @@ PERCY_TOKEN=<web-project-token> npx percy playwright:setup-baseline
 An optional CI gate is available via `reporter: [['@percy/playwright/dropin/reporter']]` with
 `{ "gate": "fail-on-changes" }`.
 
+### Disabling the drop-in
+
+To keep `toHaveScreenshot()` **fully native** (local pixel compare, including the
+missing-baseline behavior) while still using `percySnapshot()`/`percyScreenshot()` under
+`percy exec`, either set `{ "enabled": false }` in `.percy-playwright-dropin.json` or export
+`PERCY_DROPIN_DISABLE=true` (the env var also turns off `percy exec`'s baseline seeding). The
+override steps aside entirely — no snapshots are posted for `toHaveScreenshot()` assertions.
+
 Requires `@playwright/test` >= 1.49 (the override hooks Playwright's expect internals; on
 unsupported versions it degrades to a no-op **with a loud warning** — never silently).
 

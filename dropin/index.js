@@ -131,6 +131,14 @@ const percyMatchers = {
     const matcherState = this;
     const nativeArgs = [pageOrLocator, nameOrOptions, maybeOptions];
 
+    // (0) Deliberate opt-out (`enabled: false` / PERCY_DROPIN_DISABLE=true): run Playwright's
+    // ORIGINAL matcher, PURE native — including the missing-baseline throw (the user chose native
+    // semantics; this is not the protective fallback below). percySnapshot()/percyScreenshot()
+    // keep working under `percy exec` — the override simply steps aside.
+    if (config.enabled === false) {
+      return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: false });
+    }
+
     // (1) Run-level native fallback (D7): Percy disabled at run start → native compare for the
     // WHOLE run. Native throws on real diffs (pre-install behaviour) but we suppress the
     // missing-baseline first-run throw so installing the drop-in can't red a fresh repo.

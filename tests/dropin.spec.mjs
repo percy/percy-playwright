@@ -16,6 +16,7 @@ import helpers from '@percy/sdk-utils/test/helpers';
 import utils from '@percy/sdk-utils';
 import { test, expect } from '@playwright/test';
 import dropin from '../dropin/index.js';
+import dropinConfig from '../dropin/config.js';
 import dropinDom from '../dropin/dom.js';
 import identity from '../dropin/identity.js';
 import paths from '../dropin/paths.js';
@@ -90,6 +91,34 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
       }).toPass({ timeout: 15000 });
     } finally {
       utils.percy.type = 'web';
+    }
+  });
+
+  test('PERCY_DROPIN_DISABLE=true makes toHaveScreenshot PURE native (opt-out)', async ({ page }) => {
+    process.env.PERCY_DROPIN_DISABLE = 'true';
+    dropinConfig._reset(); // config is cached per process — force a re-read with the env set
+
+    const snapDir = new URL('./dropin.spec.mjs-snapshots/', import.meta.url);
+    try {
+      // Pre-write the on-disk baseline exactly where the NATIVE matcher looks (name + platform
+      // suffix), using the same capture options the native matcher applies. If the native pixel
+      // compare runs, the assertion passes against THIS file — the Percy path never reads it.
+      fs.mkdirSync(snapDir, { recursive: true });
+      const baseline = await page.screenshot({ animations: 'disabled', caret: 'hide', scale: 'css' });
+      fs.writeFileSync(new URL(`dropin-disabled-native-${process.platform}.png`, snapDir), baseline);
+
+      await expect(page).toHaveScreenshot('dropin-disabled-native.png');
+
+      // ...and nothing reached Percy for it — the override stepped aside entirely.
+      const snapshots = await recorded('/percy/snapshot');
+      expect(snapshots.some(s => /dropin-disabled-native/.test(s.body.name))).toBe(false);
+      const comparisons = await recorded('/percy/comparison');
+      expect(comparisons.some(c => /dropin-disabled-native/.test(c.body.name))).toBe(false);
+    } finally {
+      delete process.env.PERCY_DROPIN_DISABLE;
+      dropinConfig._reset();
+      // Remove the generated baseline dir so the repo stays clean.
+      fs.rmSync(snapDir, { recursive: true, force: true });
     }
   });
 
