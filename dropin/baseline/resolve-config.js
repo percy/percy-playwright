@@ -21,7 +21,19 @@ function resolvePlaywrightConfig({ cwd = process.cwd(), log, spawn = childProces
   const reporter = require.resolve('./config-reporter.js');
 
   try {
-    const result = spawn('npx', ['playwright', 'test', '--list', `--reporter=${reporter}`], {
+    // Windows-safe invocation: `npx` is npx.cmd there (plain spawn ENOENTs, and Node >=18.20
+    // blocks implicit .cmd resolution). Prefer the project's own Playwright CLI through the
+    // current Node binary; fall back to npx only when it isn't resolvable from `cwd`.
+    let cmd, args;
+    try {
+      const cli = require.resolve('@playwright/test/cli', { paths: [cwd] });
+      cmd = process.execPath;
+      args = [cli, 'test', '--list', `--reporter=${reporter}`];
+    } catch {
+      cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+      args = ['playwright', 'test', '--list', `--reporter=${reporter}`];
+    }
+    const result = spawn(cmd, args, {
       cwd,
       env: { ...process.env, PERCY_PW_CONFIG_OUT: out },
       encoding: 'utf8',

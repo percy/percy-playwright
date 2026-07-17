@@ -21,6 +21,7 @@ class PercyConfigReporter {
 
     const shape = {
       rootDir: config.rootDir,
+      snapshotDir: config.snapshotDir,
       snapshotPathTemplate: config.snapshotPathTemplate,
       expect: screenshotTpl(config)
         ? { toHaveScreenshot: { pathTemplate: screenshotTpl(config) } }

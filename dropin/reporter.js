@@ -37,8 +37,12 @@ function isFailing(attrs = {}, { failOnChanges, passIfApproved, isFirstBuild } =
   // KD7: the first build is review-only — never hard-fail on its (noise-dominated) diffs.
   if (isFirstBuild) return false;
 
+  // Informational mode NEVER reds CI (D3) — not for diffs and not for a failed/errored Percy
+  // build either; only the explicit fail-on-changes opt-in may produce a failing verdict.
+  if (!failOnChanges) return false;
+
   return state != null && state !== 'pending' && state !== 'processing' &&
-    (state !== 'finished' || (failOnChanges && !!diffs && !(passIfApproved && reviewState === 'approved')));
+    (state !== 'finished' || (!!diffs && !(passIfApproved && reviewState === 'approved')));
 }
 
 // First-build detection: a build with no resolved base build is build #1 for its lineage (its
@@ -145,8 +149,31 @@ class PercyGateReporter {
       const PercyClient = this._deps.client ? null : await loadClient();
       const client = this._deps.client || new PercyClient({ token: process.env.PERCY_TOKEN });
 
+      // Under `percy exec`, the build is finalized only AFTER this test process exits, so a
+      // pending build here can never finish while we wait — waitForBuild would stall to its
+      // ~10-minute timeout on every run. Give finalization a short grace window, then bow out
+      // with guidance instead of hanging CI.
+      const pendingGraceMs = this._options.pendingGraceMs ?? 30000;
+      const pollMs = this._options.pendingPollMs ?? 2000;
+      let probe = await client.getBuild(String(buildId));
+      let probeState = probe && probe.data && probe.data.attributes && probe.data.attributes.state;
+      const graceDeadline = Date.now() + pendingGraceMs;
+      while (probeState === 'pending' && Date.now() < graceDeadline) {
+        await new Promise(resolve => setTimeout(resolve, pollMs));
+        probe = await client.getBuild(String(buildId));
+        probeState = probe && probe.data && probe.data.attributes && probe.data.attributes.state;
+      }
+      if (probeState === 'pending') {
+        log.info('Percy: gate skipped — the build is not finalized yet (under `percy exec` the ' +
+          'build finalizes after the test process exits). To gate CI on the verdict, run ' +
+          '`npx percy build:wait --build ' + buildId + '` as a step after the exec command.');
+        return;
+      }
+
       // Wait for the build to reach a terminal state (reuse the client's waitForBuild poller).
-      const buildResponse = await client.waitForBuild({ build: String(buildId) });
+      const buildResponse = (probeState !== 'processing')
+        ? probe
+        : await client.waitForBuild({ build: String(buildId) });
       const attrs = (buildResponse && buildResponse.data && buildResponse.data.attributes) || {};
       const webUrl = attrs['web-url'];
       const isFirstBuild = isFirstBuildResponse(buildResponse);
@@ -171,6 +198,10 @@ class PercyGateReporter {
       if (failing) {
         log.error(`Percy: visual changes detected — failing CI. ${webUrl || ''}`.trim());
         this._fail();
+        // Playwright computes its exit code from test status alone and calls process.exit(),
+        // which discards process.exitCode — returning a failed status from onEnd is the
+        // supported way for a reporter to red the run.
+        return { status: 'failed' };
       } else if (!failOnChanges) {
         log.info(`Percy: informational — review your build at ${webUrl || ''}`.trim());
       }
@@ -191,8 +222,8 @@ class PercyGateReporter {
     return [];
   }
 
-  // Set the failing exit status. Playwright's reporter contract honours a non-zero process.exitCode
-  // (or an exit-status return); we set process.exitCode so the CI run reds.
+  // Belt-and-braces exit signal alongside onEnd's `{ status: 'failed' }` return (the authoritative
+  // channel — Playwright's own process.exit() discards a bare process.exitCode assignment).
   _fail() {
     if (this._deps.exit) return this._deps.exit(1);
     process.exitCode = 1;

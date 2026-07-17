@@ -159,17 +159,6 @@ function classifySyncResult(result, identity = {}, opts = {}) {
   return { throw: false, message: 'Percy: no visual change', outcome: 'no_diff' };
 }
 
-// NON-AUTHORITATIVE prefix hint (FIX #3). A token's prefix (`web_`/`auto_`) encodes the project
-// TYPE, not the permission ROLE — the role isn't in the token string at all. So this is only a weak
-// HINT for diagnostics: a generic-project write-only token (`ss_…`) has no `web_`/`auto_` prefix and
-// a read-capable `web_` token exists. It MUST NOT drive a refusal on its own — the authoritative
-// signal is the runtime 403 from the sync read (see isAuthFailure / the classifier's no-verdict
-// bucket). Kept only so callers can log a hint; never used to refuse.
-function isWriteOnlyToken(token) {
-  if (!token) return false;
-  return /^web_/i.test(token) || /^auto_/i.test(token);
-}
-
 // Best-effort pre-flight token-scope check (FIX #3). We NO LONGER refuse based on the brittle prefix
 // heuristic (false negatives on `ss_…` write-only tokens, false positives on read-capable `web_`
 // tokens). Refusal is only ever returned from an AUTHORITATIVE read:
@@ -215,7 +204,6 @@ module.exports = {
   extractDiffRatio,
   dashboardUrl,
   preflightTokenScope,
-  isWriteOnlyToken,
   isAuthFailure,
   noVerdictCount,
   emitNoVerdict,

@@ -44,7 +44,7 @@ async function providerDiscoverBaselines({ cwd = process.cwd(), log } = {}, deps
     return { baselines: [], degraded: true, reason: 'playwright_config_unresolvable' };
   }
 
-  const result = discoverBaselines({ rootDir: config.rootDir || cwd, config });
+  const result = discoverBaselines({ rootDir: config.rootDir || cwd, snapshotDir: config.snapshotDir, config });
   if (result.degraded || !result.baselines.length) return result;
 
   const baselines = [];

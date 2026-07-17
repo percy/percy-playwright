@@ -591,8 +591,8 @@ module.exports.ENV_INFO = ENV_INFO;
 module.exports.frameDepth = frameDepth;
 module.exports.isCyclicFrame = isCyclicFrame;
 module.exports.captureSerializedDOM = captureSerializedDOM;
-// Internal: full DOM capture (readiness gate + responsive + CORS iframes), reused by the
-// toHaveScreenshot drop-in's snapshot mode (dropin/dom.js). Not public API.
+// Internal: full DOM capture (readiness gate + responsive + CORS iframes). Exported for unit
+// tests; the drop-in goes through percySnapshot itself (dropin/dom.js), not this. Not public API.
 module.exports.captureDOM = captureDOM;
 module.exports.resolveIgnoreSelectors = resolveIgnoreSelectors;
 module.exports.isUnsupportedIframeSrc = isUnsupportedIframeSrc;

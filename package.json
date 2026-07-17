@@ -27,7 +27,7 @@
     "baselineProvider": "dropin/baseline/provider.js"
   },
   "engines": {
-    "node": ">=14"
+    "node": ">=16"
   },
   "scripts": {
     "lint": "eslint --ignore-path .gitignore .",
@@ -44,7 +44,7 @@
   },
   "peerDependencies": {
     "playwright-core": ">=1",
-    "@playwright/test": ">=1.40.0",
+    "@playwright/test": ">=1.49.0",
     "@percy/cli": ">=1.32.3"
   },
   "peerDependenciesMeta": {

@@ -75,8 +75,13 @@ function isFirstBuildRun() {
 // rejections (Unit 7) + the mode status line here.
 let _runMode = null; // 'percy' | 'native'
 let _validated = false;
+let _validationError = null;
 async function resolveRunMode(config) {
   if (_runMode) return _runMode;
+  // A latched configuration rejection re-throws on EVERY assertion — otherwise only the first
+  // assertion would surface the config error and the rest of the run would proceed silently with
+  // the rejected config.
+  if (_validationError) throw _validationError;
 
   // Fallback can be disabled by config (then we stay in Percy mode and simply no-op when disabled).
   const enabled = await utils.isPercyEnabled().catch(() => false);
@@ -84,10 +89,16 @@ async function resolveRunMode(config) {
   // One-time footgun validation + pre-flight checks (mutual exclusion, sync+deferred, token scope).
   // A rejected combination is a CONFIGURATION error the user must fix — it is allowed to throw out
   // of the matcher (unlike a Percy *runtime* error, which D3 swallows). We only validate when Percy
-  // is live (native fallback means none of the modes are in play).
+  // is live (native fallback means none of the modes are in play). The latch is set only on
+  // SUCCESS; a rejection is remembered and re-thrown above.
   if (enabled && !_validated) {
+    try {
+      await validateConfig(config);
+    } catch (err) {
+      _validationError = err;
+      throw err;
+    }
     _validated = true;
-    await validateConfig(config);
     log.info(modeStatusLine(config));
   }
 
@@ -105,7 +116,7 @@ async function resolveRunMode(config) {
 
 // Test-only reset of the latch + native-notice (the harness re-requires a fresh process in CI, but
 // unit tests in-process need to flip run state between cases).
-function _resetRunState() { _runMode = null; _validated = false; fallback._resetNotice(); }
+function _resetRunState() { _runMode = null; _validated = false; _validationError = null; fallback._resetNotice(); }
 
 // Build the postComparison options for a captured tile (APP projects). `sync` is added only in
 // sync mode so the CLI awaits the per-comparison verdict.
@@ -114,11 +125,14 @@ function comparisonOptions({ name, browserFamily, width, pngBuffer, sync }) {
   // IDENTITY width (viewport) so baseline↔head pairing is stable, height comes from the actual
   // PNG bytes (accurate for both page and element captures).
   const dims = pngDimensions(pngBuffer);
+  // percy-api validates tag height presence — a heightless post is a guaranteed server-side
+  // reject the run never sees. An unparseable PNG skips the post instead (caller logs it).
+  if (!dims) return null;
   const options = {
     name,
     clientInfo: CLIENT_INFO,
     environmentInfo: ENV_INFO,
-    tag: { name: browserFamily, browserName: browserFamily, width, height: dims && dims.height },
+    tag: { name: browserFamily, browserName: browserFamily, width, height: dims.height },
     tiles: [{ content: pngBuffer.toString('base64') }]
   };
   if (sync) options.sync = true;
@@ -150,8 +164,12 @@ const percyMatchers = {
     // (2) Percy is live. Capture + post. D3: a Percy *error* must never fail the suite.
     let syncResult;
     try {
+      // Always-pass posture for negated calls too: Playwright inverts `pass` for `.not`
+      // chains, so a hardcoded `pass: true` would FAIL every `.not.toHaveScreenshot()`.
+      const passValue = !matcherState.isNot;
+
       if (!(await utils.isPercyEnabled())) {
-        return { pass: true, message: () => 'Percy is disabled — snapshot skipped' };
+        return { pass: passValue, message: () => 'Percy is disabled — snapshot skipped' };
       }
 
       const nameArg = typeof nameOrOptions === 'string' || Array.isArray(nameOrOptions) ? nameOrOptions : undefined;
@@ -167,7 +185,10 @@ const percyMatchers = {
         const pngBuffer = await captureFullOverride(pageOrLocator, options);
         const postOptions = comparisonOptions({ name, browserFamily, width, pngBuffer, sync: config.sync });
 
-        if (config.sync) {
+        if (!postOptions) {
+          // Unparseable PNG — sync mode falls through to the classifier's no-verdict bucket.
+          log.debug(`Percy: skipped "${name}" — could not read PNG dimensions from the capture`);
+        } else if (config.sync) {
           // Sync mode: a missing verdict must still red CI via the Gate-A backstop, so the post
           // here is NOT wrapped in retryablePost's swallow — the classifier owns the {error}
           // bucket. Runtime guard: assert sync actually engaged (a deferred-upload that slipped
@@ -198,7 +219,7 @@ const percyMatchers = {
           // Real regression on a non-first build → fail THIS assertion inline (dashboard URL in msg).
           return { pass: false, message: () => verdict.message };
         }
-        return { pass: true, message: () => verdict.message || '' };
+        return { pass: passValue, message: () => verdict.message || '' };
       }
     } catch (err) {
       // D3: any Percy error (capture, post, classify) is swallowed — never fail the functional
@@ -213,7 +234,7 @@ const percyMatchers = {
     }
 
     // (5) Default async always-pass (D6): verdict deferred to Percy's async review.
-    return { pass: true, message: () => '' };
+    return { pass: !matcherState.isNot, message: () => '' };
   }
 };
 

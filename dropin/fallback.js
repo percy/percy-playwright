@@ -56,31 +56,6 @@ function isMissingBaselineFailure(errOrResult) {
   return Boolean(msg && MISSING_BASELINE_RE.test(String(msg)));
 }
 
-// Invoke the captured native matcher with the same `this` (matcher state) and args Playwright would
-// have used. Playwright's matchers may either THROW (hard assertions) or RETURN `{ pass:false }`
-// (soft path) on a diff; we normalise both. When `suppressMissingBaseline` is set (compat mode),
-// a missing-baseline outcome is converted to a PASS so a first run never reds on an absent baseline.
-async function runNativeMatcher(nativeMatcher, matcherState, args, { suppressMissingBaseline = false } = {}) {
-  if (typeof nativeMatcher !== 'function') {
-    // No native matcher available → we cannot do a native compare. Pass so we never fail worse
-    // than pre-install would on an unsupported Playwright (D3 spirit).
-    return { pass: true, message: () => 'Percy: native screenshot matcher unavailable — skipped' };
-  }
-
-  try {
-    const result = await nativeMatcher.apply(matcherState, args);
-    if (result && result.pass === false && suppressMissingBaseline && isMissingBaselineFailure(result)) {
-      return { pass: true, message: () => 'Percy: first run — no committed baseline yet (compat-mode suppressed)' };
-    }
-    return result;
-  } catch (err) {
-    if (suppressMissingBaseline && isMissingBaselineFailure(err)) {
-      return { pass: true, message: () => 'Percy: first run — no committed baseline yet (compat-mode suppressed)' };
-    }
-    throw err;
-  }
-}
-
 // One-time native-fallback notice (plan §User-Facing States): printed once on entering native so a
 // green CI isn't mistaken for "Percy passed".
 let noticeShown = false;
@@ -164,7 +139,6 @@ async function runNativeViaExpect(nativeExpect, matcherState, args, { suppressMi
 
 module.exports = {
   captureNativeMatcher,
-  runNativeMatcher,
   runNativeViaExpect,
   scrubMissingBaselineSoftError,
   isMissingBaselineFailure,

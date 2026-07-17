@@ -24,7 +24,7 @@ export const setupBaseline = command('setup-baseline', {
   percy: {
     skipDiscovery: true
   }
-}, async function*({ percy, log, exit }) {
+}, async function * ({ percy, log, exit }) {
   if (!percy) exit(1, 'Percy is disabled');
 
   // Web projects seed rendered snapshots; app projects seed raw comparison uploads (no render
@@ -38,7 +38,17 @@ export const setupBaseline = command('setup-baseline', {
   // The provider owns all Playwright knowledge (config resolution, snapshot discovery, identity
   // mapping); the CLI's exec package owns the upload loop. Nothing is reimplemented here.
   let { default: provider } = await import('../dropin/baseline/provider.js');
-  let { uploadBaselines } = await import('@percy/cli-exec');
+
+  // uploadBaselines ships in the companion @percy/cli release — an older CLI resolves the
+  // package but not the export. Fail with guidance, not a bare TypeError.
+  let uploadBaselines;
+  try {
+    ({ uploadBaselines } = await import('@percy/cli-exec'));
+  } catch { /* handled below */ }
+  if (typeof uploadBaselines !== 'function') {
+    exit(1, 'playwright:setup-baseline requires a newer @percy/cli — ' +
+      'upgrade with `npm i -D @percy/cli@latest` and retry.');
+  }
 
   let { baselines = [], degraded, reason } =
     (await provider.discoverBaselines({ cwd: process.cwd(), log })) || {};

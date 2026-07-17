@@ -15,16 +15,15 @@ export default function percyScreenshot(
 
 // --- toHaveScreenshot drop-in (require('@percy/playwright/dropin')) ---------------------------
 // Requiring the dropin entry registers a global override of Playwright's `toHaveScreenshot()`
-// matcher (no new matcher signature; the existing one is intercepted). Capture is selected by the
-// drop-in config `captureMode`: 'screenshot' (default — raw-PNG upload, generic/app projects) or
-// 'snapshot' (serialized-DOM web snapshot via this package's own captureDOM, web projects).
+// matcher (no new matcher signature; the existing one is intercepted). Capture dispatches by the
+// Percy project type behind the token: web projects post a serialized-DOM snapshot (server-side
+// render), app projects post the captured PNG through the comparison ingest. Automate/generic
+// tokens are rejected with a configuration error.
 
-// First-build baseline hook. Point `playwright.config` `globalSetup` at
-// `@percy/playwright/dropin/global-setup`, or call this from your own globalSetup. Never throws.
-export function baselineGlobalSetup(config?: unknown): Promise<unknown>;
-
-// Opt-in CI gate reporter: reporter: [['@percy/playwright/dropin/reporter']].
+// Opt-in CI gate reporter, exported from the dropin subpath:
+//   reporter: [['@percy/playwright/dropin/reporter']]
+// Returning `{ status: 'failed' }` from onEnd is how a failing gate reds the run.
 export class PercyGateReporter {
   constructor(options?: { gate?: 'informational' | 'fail-on-changes'; passIfApproved?: boolean }, deps?: unknown);
-  onEnd(): Promise<void>;
+  onEnd(): Promise<{ status: 'failed' } | undefined>;
 }

@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 // Unit 3 / R6 — the SINGLE source of snapshot-identity truth, shared by the head-capture override
 // (index.js) and the committed-baseline discovery (baseline/discover.js).
 //
@@ -22,6 +24,19 @@ const SANITIZE_RE = /[\x00-\x2C\x2E-\x2F\x3A-\x40\x5B-\x60\x7B-\x7F]+/g;
 
 function sanitizeForFilePath(s) {
   return String(s).replace(SANITIZE_RE, '-');
+}
+
+// Playwright's trimLongString (playwright-core `trimLongString`, default cap 100): long stems are
+// shortened to `prefix-<sha1[0:5]>-suffix` BEFORE sanitization. Anonymous snapshot stems go
+// through this on disk, so the head-side name derivation must apply it identically or >100-char
+// title paths silently stop pairing.
+function trimLongString(s, length = 100) {
+  if (s.length <= length) return s;
+  const hash = crypto.createHash('sha1').update(s).digest('hex');
+  const middle = `-${hash.substring(0, 5)}-`;
+  const start = Math.floor((length - middle.length) / 2);
+  const end = length - middle.length - start;
+  return s.substring(0, start) + middle + s.slice(-end);
 }
 
 // Per-test anonymous/named snapshot counters, mirroring Playwright's `lastAnonymousSnapshotIndex` /
@@ -48,7 +63,9 @@ function countersFor(testInfo) {
 // sense that the stem is `… 1`; Playwright always appends the index for anonymous snapshots).
 function anonymousStem(titlePath, index) {
   const parts = (Array.isArray(titlePath) ? titlePath.slice(1) : []).filter(Boolean);
-  return sanitizeForFilePath([...parts, index].join(' '));
+  // Playwright: sanitizeFilePathBeforeExtension(trimLongString(fullTitleWithoutSpec) + ext) —
+  // trim FIRST, then sanitize, matching the on-disk stem byte-for-byte.
+  return sanitizeForFilePath(trimLongString([...parts, index].join(' ')));
 }
 
 // Build the sanitized stem for a NAMED screenshot. Playwright sanitizes the name (sans `.png`) and,
@@ -92,7 +109,12 @@ function deriveIdentity(pageOrLocator, nameArg, testInfo) {
   const viewport = (page && typeof page.viewportSize === 'function' && page.viewportSize()) || { width: 1280 };
 
   const name = deriveName(nameArg, testInfo);
-  const browserFamily = (testInfo && testInfo.project && testInfo.project.name) || 'chromium';
+  // Baseline discovery derives browserFamily from the resolved config's use.browserName — the
+  // head side must match it, NOT the project display name ('Desktop Chrome' would never pair
+  // with a baseline discovered under 'chromium'). The project name is only a last-resort
+  // fallback for configs that set no browserName.
+  const project = (testInfo && testInfo.project) || {};
+  const browserFamily = (project.use && project.use.browserName) || project.name || 'chromium';
   return { name, browserFamily, width: viewport.width };
 }
 
@@ -107,6 +129,7 @@ module.exports = {
   deriveIdentity,
   deriveName,
   sanitizeForFilePath,
+  trimLongString,
   anonymousStem,
   _resetCounters
 };

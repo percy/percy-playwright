@@ -23,6 +23,10 @@ import paths from '../dropin/paths.js';
 import provider from '../dropin/baseline/provider.js';
 import resolveConfig from '../dropin/baseline/resolve-config.js';
 import ConfigReporter from '../dropin/baseline/config-reporter.js';
+import reporterMod from '../dropin/reporter.js';
+import { createRequire } from 'module';
+
+const nodeRequire = createRequire(import.meta.url);
 
 const { snapshotViaPercy, SCOPE_ATTR } = dropinDom;
 const { deriveName, _resetCounters } = identity;
@@ -131,6 +135,10 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
     try {
       await expect(expect(page).toHaveScreenshot('dropin-wrong-token.png'))
         .rejects.toThrow(/requires a web or app project token/);
+      // The rejection is LATCHED: every later assertion re-throws too — a config error must
+      // never degrade into a silent always-pass run after the first test.
+      await expect(expect(page).toHaveScreenshot('dropin-wrong-token-2.png'))
+        .rejects.toThrow(/requires a web or app project token/);
     } finally {
       utils.percy.type = 'web';
       _resetRunState();
@@ -190,6 +198,94 @@ test.describe('drop-in units', () => {
     expect(receivedArgs.options.widths).toEqual([900]);
     expect(receivedArgs.options.minHeight).toBe(page.viewportSize().height);
     expect(receivedArgs.options.sync).toBe(true);
+  });
+});
+
+test.describe('review fixes (identity parity, reporter gate)', () => {
+  test('anonymous stems over 100 chars trim exactly like Playwright (trimLongString parity)', () => {
+    const { trimLongString: pwTrim, sanitizeForFilePath: pwSanitize } =
+      nodeRequire('playwright-core/lib/coreBundle').utils;
+    _resetCounters();
+    const longSuite = ('very long suite title segment '.repeat(6)).trim();
+    const ti = { titlePath: ['spec.ts', longSuite, 'case'] };
+    const expected = pwSanitize(pwTrim([longSuite, 'case', 1].join(' ')));
+    expect(deriveName(undefined, ti)).toBe(expected);
+    expect(identity.trimLongString('short')).toBe('short');
+  });
+
+  test('deriveIdentity keys browserFamily on use.browserName, not the project display name', () => {
+    _resetCounters();
+    const page = { viewportSize: () => ({ width: 1440, height: 900 }) };
+    const id = identity.deriveIdentity(page, 'shot.png', {
+      titlePath: ['s.ts', 't'],
+      project: { name: 'Desktop Chrome', use: { browserName: 'chromium' } }
+    });
+    expect(id.browserFamily).toBe('chromium');
+    expect(id.width).toBe(1440);
+    const id2 = identity.deriveIdentity(page, 'shot2.png', {
+      titlePath: ['s.ts', 't'],
+      project: { name: 'firefox', use: {} }
+    });
+    expect(id2.browserFamily).toBe('firefox');
+  });
+
+  test('isFailing: informational mode never reds CI, even for failed/errored builds', () => {
+    const { isFailing } = reporterMod;
+    expect(isFailing({ state: 'failed' }, { failOnChanges: false })).toBe(false);
+    expect(isFailing({ state: 'errored' }, { failOnChanges: false })).toBe(false);
+    expect(isFailing({ state: 'finished', 'total-comparisons-diff': 3 }, { failOnChanges: false })).toBe(false);
+    expect(isFailing({ state: 'finished', 'total-comparisons-diff': 3 }, { failOnChanges: true })).toBe(true);
+    expect(isFailing(
+      { state: 'finished', 'total-comparisons-diff': 3, 'review-state': 'approved' },
+      { failOnChanges: true, passIfApproved: true }
+    )).toBe(false);
+    expect(isFailing({ state: 'failed' }, { failOnChanges: true })).toBe(true);
+    expect(isFailing(
+      { state: 'finished', 'total-comparisons-diff': 3 },
+      { failOnChanges: true, isFirstBuild: true }
+    )).toBe(false);
+  });
+
+  test('gate reporter reds the run via the onEnd status return', async () => {
+    const finished = {
+      data: {
+        attributes: { state: 'finished', 'total-comparisons-diff': 2, 'web-url': 'http://percy/b' },
+        relationships: { 'base-build': { data: { id: '1' } } }
+      }
+    };
+    let exited = null;
+    const client = {
+      getBuild: async () => finished,
+      waitForBuild: async () => finished,
+      getComparisons: async () => ({ data: [] })
+    };
+    const reporter = new reporterMod.PercyGateReporter(
+      { gate: 'fail-on-changes' },
+      { buildId: '42', client, config: { fallback: true }, exit: code => { exited = code; } }
+    );
+
+    const result = await reporter.onEnd();
+
+    expect(result).toEqual({ status: 'failed' });
+    expect(exited).toBe(1);
+  });
+
+  test('gate reporter bows out when the build never finalizes (running under percy exec)', async () => {
+    const pending = { data: { attributes: { state: 'pending' } } };
+    let waitedForBuild = false;
+    const client = {
+      getBuild: async () => pending,
+      waitForBuild: async () => { waitedForBuild = true; return pending; }
+    };
+    const reporter = new reporterMod.PercyGateReporter(
+      { gate: 'fail-on-changes', pendingGraceMs: 30, pendingPollMs: 5 },
+      { buildId: '42', client, config: {} }
+    );
+
+    const result = await reporter.onEnd();
+
+    expect(result).toBeUndefined();
+    expect(waitedForBuild, 'must not enter the 10-minute waitForBuild poller').toBe(false);
   });
 });
 
