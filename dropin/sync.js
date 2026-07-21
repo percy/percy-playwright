@@ -159,51 +159,10 @@ function classifySyncResult(result, identity = {}, opts = {}) {
   return { throw: false, message: 'Percy: no visual change', outcome: 'no_diff' };
 }
 
-// Best-effort pre-flight token-scope check (FIX #3). We NO LONGER refuse based on the brittle prefix
-// heuristic (false negatives on `ss_…` write-only tokens, false positives on read-capable `web_`
-// tokens). Refusal is only ever returned from an AUTHORITATIVE read:
-//   • an injected `probe` that actually asks the API whether reads are allowed, or
-//   • a real resource-backed read via @percy/client.getBuild when a build id is already known.
-// When NO resource is available we SKIP the pre-flight refusal (return ok) rather than guess — the
-// runtime 403 in the classifier is the real backstop, so we never block sync on a guess.
-// Resolves { ok, reason }.
-async function preflightTokenScope({ token = process.env.PERCY_TOKEN, probe, buildId, client } = {}) {
-  if (probe) {
-    try {
-      const readable = await probe(token);
-      return readable
-        ? { ok: true }
-        : { ok: false, reason: 'token cannot read comparison results' };
-    } catch (err) {
-      return { ok: false, reason: `token scope check failed — ${err.message}` };
-    }
-  }
-
-  // Resource-backed pre-flight: only when a build id is already known. getBuild reads through the
-  // same percy-api read gate, so a 403/401 here is the authoritative write-only signal.
-  if (buildId && client && typeof client.getBuild === 'function') {
-    try {
-      await client.getBuild(buildId);
-      return { ok: true };
-    } catch (err) {
-      if (isAuthFailure(err)) {
-        return { ok: false, reason: 'token cannot read comparison results' };
-      }
-      // Non-auth error (network, 404, …) is NOT a scope verdict — do not refuse on a guess.
-      return { ok: true };
-    }
-  }
-
-  // No resource to read against → cannot authoritatively decide pre-flight. Allow; the classifier's
-  // 403 handling backstops at runtime.
-  return { ok: true };
-}
-
 module.exports = {
   classifySyncResult,
   extractDiffRatio,
   dashboardUrl,
-  preflightTokenScope,
   isAuthFailure,
   noVerdictCount,
   emitNoVerdict,

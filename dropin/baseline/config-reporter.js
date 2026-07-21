@@ -39,6 +39,8 @@ class PercyConfigReporter {
       }))
     };
 
+    // Local-only handoff: resolve-config.js (the spawning side) reads this file immediately and
+    // deletes it in its `finally` — nothing here is uploaded or persisted beyond the one call.
     fs.writeFileSync(out, JSON.stringify(shape));
   }
 

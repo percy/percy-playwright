@@ -29,10 +29,11 @@ export const setupBaseline = command('setup-baseline', {
 
   // Web projects seed rendered snapshots; app projects seed raw comparison uploads (no render
   // flow — like App Percy). Anything else is a wrong token.
+  let { SUPPORTED_PROJECT_TYPES, wrongTokenError } = await import('../dropin/config.js')
+    .then(m => m.default || m);
   let projectType = percy.client.tokenType();
-  if (projectType !== 'web' && projectType !== 'app') {
-    exit(1, 'playwright:setup-baseline requires a Percy web or app project token — ' +
-      `the configured token is for a "${projectType}" project.`);
+  if (!SUPPORTED_PROJECT_TYPES.includes(projectType)) {
+    exit(1, wrongTokenError(projectType, { context: 'playwright:setup-baseline' }));
   }
 
   // The provider owns all Playwright knowledge (config resolution, snapshot discovery, identity

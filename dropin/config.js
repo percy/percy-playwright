@@ -24,7 +24,6 @@
 const fs = require('fs');
 const path = require('path');
 const utils = require('@percy/sdk-utils');
-const { preflightTokenScope } = require('./sync');
 const { sanitizePath } = require('./paths');
 
 const log = utils.logger('playwright-dropin');
@@ -100,22 +99,28 @@ function loadConfig({ rootDir = process.cwd(), force = false } = {}) {
   return _cache;
 }
 
+// The drop-in supports exactly these Percy project types; shared with the setup-baseline
+// command so the wrong-token wording stays identical everywhere.
+const SUPPORTED_PROJECT_TYPES = ['web', 'app'];
+
+function wrongTokenError(projectType, { context = 'Percy Playwright drop-in' } = {}) {
+  return `${context} requires a web or app project token — the configured token is ${
+    projectType === 'automate' ? 'for a Percy on Automate' : `for a "${projectType}"`
+  } project. Use a web/app project token, or use percyScreenshot() directly for Automate.`;
+}
+
 // Async footgun validation + pre-flight checks. Call once at run start (index.js resolveRunMode /
 // globalSetup). Throws a clear error on a rejected combination so the user fixes their config rather
 // than silently getting the wrong behaviour. Returns the validated config.
-async function validateConfig(config = loadConfig(), { token = process.env.PERCY_TOKEN, probe } = {}) {
+async function validateConfig(config = loadConfig()) {
   // The drop-in supports WEB projects (serialized-DOM snapshots, rendered server-side) and APP
   // projects (raw screenshot upload through the comparison ingest — no render flow, like App
   // Percy). Any other token is a configuration error the user must fix — same posture as the
   // other SDKs' wrong-token errors. `percy.type` is populated by the isPercyEnabled()
   // healthcheck that always precedes validation.
   const projectType = utils.percy && utils.percy.type;
-  if (projectType && projectType !== 'web' && projectType !== 'app') {
-    throw new Error(
-      `Percy Playwright drop-in requires a web or app project token — the configured token is ${
-        projectType === 'automate' ? 'for a Percy on Automate' : `for a "${projectType}"`
-      } project. Use a web/app project token, or use percyScreenshot() directly for Automate.`
-    );
+  if (projectType && !SUPPORTED_PROJECT_TYPES.includes(projectType)) {
+    throw new Error(wrongTokenError(projectType));
   }
 
   // Determine which throw-modes are active. always-pass is the DEFAULT posture; sync (global) and
@@ -152,16 +157,9 @@ async function validateConfig(config = loadConfig(), { token = process.env.PERCY
       );
     }
 
-    // Pre-flight token-scope check: refuse to enable sync on a write-only token (don't wait for the
-    // first 403, which would bucket every assertion as no-verdict AND break the Gate-A backstop).
-    const scope = await preflightTokenScope({ token, probe });
-    if (!scope.ok) {
-      throw new Error(
-        'Percy: sync mode is disabled — it needs a read-capable token, but the configured token ' +
-        `is write-only (${scope.reason}). Use a full/read token, or remove snapshot.sync. ` +
-        'See https://percy.io/docs for token scopes.'
-      );
-    }
+    // No client-side token-scope pre-flight: with sync the CLI polls internally and returns the
+    // verdict on the post itself, so the SDK never needs a read — a genuinely unauthorized token
+    // surfaces as a 403 in the classifier's no-verdict bucket, backstopped by the gate (Gate A).
 
     // Blast-radius warning (a full token leak is org-wide — plan §User-Facing States).
     log.warn('Percy: sync mode is using a full-access token. If it leaks from CI it grants ' +
@@ -199,6 +197,8 @@ function modeStatusLine(config = loadConfig()) {
 function _reset() { _cache = null; }
 
 module.exports = {
+  SUPPORTED_PROJECT_TYPES,
+  wrongTokenError,
   loadConfig,
   validateConfig,
   assertSyncEngaged,

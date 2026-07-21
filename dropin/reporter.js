@@ -123,7 +123,8 @@ class PercyGateReporter {
   _resolveBuildId() {
     if (this._deps.buildId) return this._deps.buildId;
     if (process.env.PERCY_BUILD_ID) return process.env.PERCY_BUILD_ID;
-    return utils.percy && utils.percy.build && utils.percy.build.id;
+    const build = require('./percy-info').percyBuild();
+    return build && build.id;
   }
 
   async onEnd() {

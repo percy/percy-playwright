@@ -39,7 +39,14 @@ const fallback = require('./fallback');
 const { classifySyncResult } = require('./sync');
 const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine } = require('./config');
 
-const { CLIENT_INFO, ENV_INFO } = require('./version-info');
+const { percyProjectType, isBaselineBuildRun } = require('./percy-info');
+
+// Client/environment attribution comes from the ROOT SDK module — the single source (the root
+// exports CLIENT_INFO/ENV_INFO and sdk-utils folds them into the request user agent). Required
+// lazily: the drop-in loads inside playwright.config before the runner finishes booting, and must
+// not pull the full SDK at config-load time (same reason dom.js requires the root lazily).
+let _root;
+function versionInfo() { return (_root = _root || require('../index.js')); }
 const { pngDimensions } = require('./png');
 const log = utils.logger('playwright-dropin');
 
@@ -62,13 +69,6 @@ function currentTestInfo() {
 // First-build detection for the sync classifier (KD7). With no committed baselines the head run
 // itself becomes the project's baseline: `percy exec` sends the baseline-candidate flag and the
 // API rewrites the build's source iff it is the project's first build. The CLI exposes the decided
-// source through the healthcheck build info — when this run's build IS the baseline, its diffs are
-// baseline-establishment noise. The reporter (Gate A) does the authoritative post-finish detection.
-function isFirstBuildRun() {
-  return Boolean(utils.percy && utils.percy.build &&
-    utils.percy.build.source === 'playwright-dropin-baseline');
-}
-
 // Run-level native-fallback latch (D7/KD6). isPercyEnabled() is checked once at the FIRST assertion;
 // its verdict is latched for the whole run so we never go partial-native mid-run (mid-run blips are
 // retried instead). null = not yet decided. We also run the one-time config validation + footgun
@@ -130,8 +130,8 @@ function comparisonOptions({ name, browserFamily, width, pngBuffer, sync }) {
   if (!dims) return null;
   const options = {
     name,
-    clientInfo: CLIENT_INFO,
-    environmentInfo: ENV_INFO,
+    clientInfo: versionInfo().CLIENT_INFO,
+    environmentInfo: versionInfo().ENV_INFO,
     tag: { name: browserFamily, browserName: browserFamily, width, height: dims.height },
     tiles: [{ content: pngBuffer.toString('base64') }]
   };
@@ -179,7 +179,7 @@ const percyMatchers = {
 
       // Automatic dispatch by project type (validateConfig has already rejected anything that is
       // neither web nor app, so this is a clean two-way switch).
-      if (((utils.percy && utils.percy.type) || 'web') === 'app') {
+      if (percyProjectType() === 'app') {
         // APP project — upload the captured PNG straight through the comparison ingest; no render
         // flow is triggered server-side (exactly how App Percy ingests screenshots).
         const pngBuffer = await captureFullOverride(pageOrLocator, options);
@@ -214,7 +214,7 @@ const percyMatchers = {
       // (3) Sync mode (D10/KD14): apply the 3-way classifier ABOVE the capture seam. First-build
       // review-only (KD7) and the {error} no-verdict bucket are handled inside the classifier.
       if (config.sync) {
-        const verdict = classifySyncResult(syncResult, { name, browserFamily, width }, { isFirstBuild: isFirstBuildRun() });
+        const verdict = classifySyncResult(syncResult, { name, browserFamily, width }, { isFirstBuild: isBaselineBuildRun() });
         if (verdict.throw) {
           // Real regression on a non-first build → fail THIS assertion inline (dashboard URL in msg).
           return { pass: false, message: () => verdict.message };
@@ -262,8 +262,6 @@ if (metaSym) {
 const PercyGateReporter = require('./reporter');
 
 module.exports = {
-  CLIENT_INFO,
-  ENV_INFO,
   PercyGateReporter,
   _resetRunState,
   nativeMatcher
