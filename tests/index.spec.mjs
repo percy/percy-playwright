@@ -406,13 +406,17 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized for responsive capture with mobile widths
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/)
-    ]));
+    // Shared testing server: logs from parallel workers land asynchronously — poll like the
+    // sibling specs instead of asserting a single racy read.
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/)
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('multiDOM should not run when deferUploads is true', async ({ page }) => {
