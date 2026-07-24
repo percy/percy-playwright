@@ -1,8 +1,8 @@
 'use strict';
 
-// KD4 (spike-decided): full-override capture — own the screenshot, return a pure PNG buffer with
-// NO assertion side-effects. Capture options mirror Playwright's toHaveScreenshot defaults so the
-// bytes match how repo baselines were generated (D2 — keeps first-build noise low).
+// Full-override capture — own the screenshot, return a pure PNG buffer with no assertion
+// side-effects. Capture options mirror Playwright's toHaveScreenshot defaults so the bytes match
+// how repo baselines were generated (keeps first-build noise low).
 const PASS_THROUGH_OPTS = ['clip', 'fullPage', 'mask', 'maskColor', 'omitBackground', 'scale', 'animations', 'caret', 'style', 'stylePath'];
 
 async function captureFullOverride(pageOrLocator, options = {}) {

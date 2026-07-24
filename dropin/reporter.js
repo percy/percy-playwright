@@ -1,18 +1,18 @@
 'use strict';
 
-// Unit 5 — the opt-in gate reporter (R5/KD7).
+// The opt-in gate reporter.
 //
 // A Playwright reporter whose `onEnd` waits for the Percy build to finish and decides CI pass/fail:
 //   • Default = INFORMATIONAL (green + the Percy build link) — Percy never reds CI unless opted in.
 //   • Opt-in gate (config.gate === 'fail-on-changes') → reuse `build:wait --fail-on-changes`
 //     semantics (cli/packages/cli-build/src/wait.js `isFailing`): red when a FINISHED build has
 //     diffs, unless the build is approved (pass-if-approved).
-//   • KD7 — the FIRST build is REVIEW-ONLY: build #1 has no base build (its repo-PNG-base-vs-head
+//   • The FIRST build is REVIEW-ONLY: build #1 has no base build (its repo-PNG-base-vs-head
 //     diffs are baseline-establishment noise, not regressions) → surface, NEVER hard-fail.
 //   • Attribution: list changed comparisons (test title + snapshot + browser/width) so a red build
 //     is traceable to the exact assertions.
 //
-// This is ALSO the mandatory Gate-A backstop for sync mode (Unit 5b/KD14): it catches the
+// This is ALSO the mandatory backstop for sync mode: it catches the
 // no-verdict population (their diffs still land in build-level total-comparisons-diff). So when sync
 // is on we keep the gate active even if the consumer left it informational — see resolveGateMode.
 const utils = require('@percy/sdk-utils');
@@ -28,16 +28,16 @@ async function loadClient() {
 }
 
 // `build:wait` failing semantics (mirror of cli/packages/cli-build/src/wait.js `isFailing`), with
-// the KD7 first-build carve-out folded in. `attrs` is the build's JSONAPI attributes.
+// the first-build carve-out folded in. `attrs` is the build's JSONAPI attributes.
 function isFailing(attrs = {}, { failOnChanges, passIfApproved, isFirstBuild } = {}) {
   const state = attrs.state;
   const diffs = attrs['total-comparisons-diff'];
   const reviewState = attrs['review-state'];
 
-  // KD7: the first build is review-only — never hard-fail on its (noise-dominated) diffs.
+  // The first build is review-only — never hard-fail on its (noise-dominated) diffs.
   if (isFirstBuild) return false;
 
-  // Informational mode NEVER reds CI (D3) — not for diffs and not for a failed/errored Percy
+  // Informational mode NEVER reds CI — not for diffs and not for a failed/errored Percy
   // build either; only the explicit fail-on-changes opt-in may produce a failing verdict.
   if (!failOnChanges) return false;
 
@@ -46,7 +46,7 @@ function isFailing(attrs = {}, { failOnChanges, passIfApproved, isFirstBuild } =
 }
 
 // First-build detection: a build with no resolved base build is build #1 for its lineage (its
-// diffs are baseline-establishment noise — KD7). We treat a missing `base-build` relationship OR
+// diffs are baseline-establishment noise). We treat a missing `base-build` relationship OR
 // build-number 1 as first-build; either signal is sufficient.
 function isFirstBuildResponse(buildResponse) {
   const data = buildResponse && buildResponse.data;
@@ -57,7 +57,7 @@ function isFirstBuildResponse(buildResponse) {
   return !hasBase || number === 1;
 }
 
-// Format the attribution list (plan §User-Facing States "Gate attribution list"). `changed` is a
+// Format the attribution list. `changed` is a
 // list of { title, snapshot, browserFamily, width, url, reason? } already mapped from comparisons.
 function formatAttribution(changed, { webUrl } = {}) {
   if (!changed.length) {
@@ -111,7 +111,7 @@ class PercyGateReporter {
   }
 
   // Resolve the gate mode. Default informational; opt-in via reporter option or config; sync mode
-  // forces the gate ON as its mandatory backstop (KD14) — sync-without-gate would false-green the
+  // forces the gate ON as its mandatory backstop — sync-without-gate would false-green the
   // no-verdict population.
   _gateMode(config) {
     if (config && config.sync) return 'fail-on-changes';
@@ -132,7 +132,7 @@ class PercyGateReporter {
       const config = this._deps.config || require('./config').loadConfig();
       const enabled = await utils.isPercyEnabled().catch(() => false);
       if (!enabled) {
-        // Native fallback was active (Unit 6) — a green CI here is NOT "Percy passed".
+        // Native fallback was active — a green CI here is NOT "Percy passed".
         log.info('Percy: gate skipped — Percy not active for this run');
         return;
       }
@@ -207,7 +207,7 @@ class PercyGateReporter {
         log.info(`Percy: informational — review your build at ${webUrl || ''}`.trim());
       }
     } catch (err) {
-      // D3: a Percy/gate error must never red the suite by accident. A gate that can't reach Percy
+      // A Percy/gate error must never red the suite by accident. A gate that can't reach Percy
       // stays green (the user's tests already passed/failed on their own merits).
       log.debug(`Percy: gate skipped — ${err.message}`);
     }

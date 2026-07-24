@@ -1,7 +1,6 @@
 'use strict';
 
-// Unit 7 — optional in-package drop-in config (D8) + the CENTRAL throw-policy / footgun-rejection
-// point (KD4/KD14).
+// Optional in-package drop-in config + the central throw-policy / footgun-rejection point.
 //
 // "One config line" stays the playwright.config registration; THIS file is an optional escape
 // hatch. Zero-config works WITHOUT a file — the file only overrides defaults.
@@ -10,10 +9,10 @@
 //   • enabled: boolean (default true) — false makes toHaveScreenshot() PURE NATIVE (no Percy
 //     post, no missing-baseline suppression) while percySnapshot()/percyScreenshot() keep
 //     working under `percy exec`. Env override: PERCY_DROPIN_DISABLE=true.
-//   • gate:    'informational' (default) | 'fail-on-changes'   (Unit 5)
-//   • compat:  boolean — preserve native throw semantics (Unit 6 / D6)
-//   • fallback: boolean (default true) — native fallback when Percy is disabled at run start (D7)
-//   • alwaysPass: boolean (default true) — the D6 async always-pass posture
+//   • gate:    'informational' (default) | 'fail-on-changes'
+//   • compat:  boolean — preserve native throw semantics
+//   • fallback: boolean (default true) — native fallback when Percy is disabled at run start
+//   • alwaysPass: boolean (default true) — the async always-pass posture
 //   • passIfApproved: boolean — gate carve-out
 //
 // SYNC IS NOT A DROP-IN FIELD. It is read from the GLOBAL `.percy.yml snapshot.sync` via the
@@ -64,7 +63,7 @@ function readSyncFromHealthcheck() {
 }
 
 // Detect a deferred/skip/delay upload setting in the global percy.config — sync silently no-ops
-// under any of these (percy.js syncMode()), so we must REJECT the combination (R-sync-silentdisable).
+// under any of these (percy.js syncMode()), so we must REJECT the combination.
 function deferredUploadSet() {
   const p = (utils.percy && utils.percy.config && utils.percy.config.percy) || {};
   return Boolean(p.deferUploads || p.delayUploads || p.skipUploads);
@@ -159,9 +158,9 @@ async function validateConfig(config = loadConfig()) {
 
     // No client-side token-scope pre-flight: with sync the CLI polls internally and returns the
     // verdict on the post itself, so the SDK never needs a read — a genuinely unauthorized token
-    // surfaces as a 403 in the classifier's no-verdict bucket, backstopped by the gate (Gate A).
+    // surfaces as a 403 in the classifier's no-verdict bucket, backstopped by the reporter gate.
 
-    // Blast-radius warning (a full token leak is org-wide — plan §User-Facing States).
+    // Blast-radius warning (a full token leak is org-wide).
     log.warn('Percy: sync mode is using a full-access token. If it leaks from CI it grants ' +
       'org-wide read/approve/delete across all projects. Prefer a dedicated read-only service ' +
       'account; never log it.');
@@ -183,7 +182,7 @@ function assertSyncEngaged(config = loadConfig()) {
   return true;
 }
 
-// Status line (plan §User-Facing States "Mode status line").
+// One-line mode status, logged once at run start.
 function modeStatusLine(config = loadConfig()) {
   let mode = 'async-always-pass';
   if (config.sync) mode = 'sync';

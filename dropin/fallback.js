@@ -1,16 +1,16 @@
 'use strict';
 
-// Unit 6 — Native fallback (D7) + compat-mode native throw (D6/KD5).
+// Native fallback + compat-mode native throw.
 //
 // Two distinct jobs, both centred on Playwright's ORIGINAL `toHaveScreenshot`:
 //
-//   1. Native fallback (D7/KD6): if Percy is NOT enabled at the START of the run (no token,
+//   1. Native fallback: if Percy is NOT enabled at the START of the run (no token,
 //      CLI down, healthcheck fail), the WHOLE run routes through the native matcher so the suite
 //      behaves EXACTLY as it did pre-install (pixel diff against committed baselines, native
 //      throw). This is a run-level decision, latched once — never partial-native inside a live
 //      Percy run (mid-run blips are retried/queued instead, see retryablePost).
 //
-//   2. Compat mode (D6/KD5): the user opts in to keep native THROW semantics even with Percy on,
+//   2. Compat mode: the user opts in to keep native THROW semantics even with Percy on,
 //      but we SUPPRESS the missing-baseline first-run throw so installing the drop-in (which means
 //      a repo may have no committed baseline yet) never reds a first run just because no baseline
 //      exists.
@@ -56,7 +56,7 @@ function isMissingBaselineFailure(errOrResult) {
   return Boolean(msg && MISSING_BASELINE_RE.test(String(msg)));
 }
 
-// One-time native-fallback notice (plan §User-Facing States): printed once on entering native so a
+// One-time native-fallback notice: printed once on entering native so a
 // green CI isn't mistaken for "Percy passed".
 let noticeShown = false;
 function noteNativeFallback(reason) {
@@ -68,10 +68,10 @@ function noteNativeFallback(reason) {
 // Reset hook for tests (the one-time notice latch).
 function _resetNotice() { noticeShown = false; }
 
-// Mid-run upload resilience (D7/KD6): a transient post failure inside a LIVE Percy run must NOT
+// Mid-run upload resilience: a transient post failure inside a LIVE Percy run must NOT
 // drop to native (that would mix native + Percy in one build). Instead retry the post a few times
-// with backoff; if it still fails, swallow (D3 — never fail the suite on a Percy error) at
-// debug-level (plan: mid-run blip is debug-only, no user-facing alarm).
+// with backoff; if it still fails, swallow — a Percy error must never fail the user's suite — at
+// debug level (a mid-run blip warrants no user-facing alarm).
 async function retryablePost(postFn, { retries = 3, backoff = 200, sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -83,8 +83,8 @@ async function retryablePost(postFn, { retries = 3, backoff = 200, sleep = ms =>
       if (attempt < retries) await sleep(backoff * (attempt + 1));
     }
   }
-  // Exhausted retries: swallow per D3 — the run stays green; the post-matrix gate (Unit 5) is the
-  // backstop for anything that genuinely didn't land.
+  // Exhausted retries: swallow — the run stays green; the reporter gate is the backstop for
+  // anything that genuinely didn't land.
   log.debug(`Percy: upload failed after retries — ${lastErr && lastErr.message}`);
   return undefined;
 }
@@ -117,7 +117,7 @@ function scrubMissingBaselineSoftError() {
 async function runNativeViaExpect(nativeExpect, matcherState, args, { suppressMissingBaseline = false } = {}) {
   if (typeof nativeExpect !== 'function') {
     // No pristine chain available → we cannot do a native compare. Pass so we never fail worse
-    // than pre-install would on an unsupported Playwright (D3 spirit).
+    // than pre-install would on an unsupported Playwright.
     return { pass: true, message: () => 'Percy: native screenshot matcher unavailable — skipped' };
   }
   const [subject, ...rest] = args;

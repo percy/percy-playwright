@@ -15,7 +15,7 @@ function percyProjectType() {
 }
 
 // Whether THIS run's build is the seeded drop-in baseline (source set server-side and surfaced
-// through the healthcheck build info) — its diffs are baseline-establishment noise (KD7).
+// through the healthcheck build info) — its diffs are baseline-establishment noise.
 function isBaselineBuildRun() {
   const build = percyBuild();
   return Boolean(build && build.source === BASELINE_SOURCE);

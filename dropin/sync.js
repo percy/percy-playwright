@@ -1,20 +1,20 @@
 'use strict';
 
-// Unit 5b — sync-assertion mode (Option C / D10 / KD14).
+// Sync-assertion mode.
 //
 // Sync is read from the GLOBAL `.percy.yml snapshot.sync` (via the healthcheck `percy.config`,
 // surfaced by config.js) — it is NOT a drop-in field. When on, the override posts the comparison
-// with `sync: true`, awaits the per-comparison verdict, and applies the KD14 3-WAY CLASSIFIER here
+// with `sync: true`, awaits the per-comparison verdict, and applies the 3-WAY CLASSIFIER here
 // (above the capture seam — the strategy returns data; index.js decides the throw):
 //
 //   1. verdict + diff           → throw inline (this test fails; message has the dashboard URL).
 //   2. verdict + no diff        → pass.
 //   3. {error} (timeout/comparison-error/CLI-exit/403) → do NOT throw; count locally + emit
-//      `playwright_dropin_sync_no_verdict`. The mandatory Gate-A backstop (reporter.js) is the ONLY
+//      `playwright_dropin_sync_no_verdict`. The mandatory reporter-gate backstop (reporter.js) is the ONLY
 //      signal that catches this population (their diffs still land in build-level
 //      total-comparisons-diff), so a no-verdict is NEVER a false-green.
 //
-// FIRST-BUILD-REVIEW-ONLY (KD7) is checked INSIDE the classifier, BEFORE the diff branch — first
+// FIRST-BUILD-REVIEW-ONLY is checked INSIDE the classifier, BEFORE the diff branch — first
 // build diffs are baseline-establishment noise, so we never throw on them.
 //
 // `handleSyncJob` (cli core) returns the comparison detail on success and `{ error }` on
@@ -24,7 +24,7 @@ const utils = require('@percy/sdk-utils');
 
 const log = utils.logger('playwright-dropin');
 
-// Per-assertion wait cap (KD14). The CLI's WaitForJob also caps at ~90s; we surface the same bound.
+// Per-assertion wait cap. The CLI's WaitForJob also caps at ~90s; we surface the same bound.
 const SYNC_TIMEOUT = 90_000;
 
 const NO_VERDICT_EVENT = 'playwright_dropin_sync_no_verdict';
@@ -34,7 +34,7 @@ let _noVerdictCount = 0;
 function noVerdictCount() { return _noVerdictCount; }
 function _resetNoVerdict() { _noVerdictCount = 0; }
 
-// One-time latch for the token-capability message (FIX #3). When the authoritative read (the
+// One-time latch for the token-capability message. When the authoritative read (the
 // CLI-side getComparisonDetails) 403s for a write-only token, EVERY assertion would otherwise spam
 // the same warning. We emit the distinct capability message exactly ONCE per run, then quietly route
 // subsequent auth-failure errors into the no-verdict bucket.
@@ -47,7 +47,7 @@ const TOKEN_CAPABILITY_MESSAGE =
   'Inline verdicts are disabled; the gate backstop still protects CI.';
 
 // Detect an auth/permission failure from a sync result's `{error}`. This is the AUTHORITATIVE
-// write-only signal (FIX #3): the CLI's handleSyncJob surfaces the percy-api 403/401 here. The error
+// write-only signal: the CLI's handleSyncJob surfaces the percy-api 403/401 here. The error
 // may be a string, an Error, or an object carrying a statusCode/status — match HTTP 403/401 or the
 // words "forbidden"/"unauthorized" case-insensitively.
 function isAuthFailure(error) {
@@ -105,7 +105,7 @@ function emitNoVerdict(identity, reason) {
 }
 
 // The 3-way classifier. Returns { throw: boolean, message: string, outcome: string }.
-// `identity` = { name, browserFamily, width }; `opts.isFirstBuild` applies KD7 suppression.
+// `identity` = { name, browserFamily, width }; `opts.isFirstBuild` applies first-build suppression.
 function classifySyncResult(result, identity = {}, opts = {}) {
   const idStr = [identity.name, identity.browserFamily, identity.width && `${identity.width}px`]
     .filter(Boolean).join(' · ');
@@ -114,11 +114,11 @@ function classifySyncResult(result, identity = {}, opts = {}) {
   if (!result || result.error) {
     const reason = (result && result.error) || 'no result returned';
 
-    // (3a) AUTH/PERMISSION failure (FIX #3) — the AUTHORITATIVE write-only signal. The sync read
+    // (3a) AUTH/PERMISSION failure — the AUTHORITATIVE write-only signal. The sync read
     // (getComparisonDetails) 403s for a write-only token; percy-api gates reads to master||read_only
     // (build_policy.rb). Emit the distinct token-capability message ONCE, then route this (and every
     // subsequent assertion) into the no-verdict bucket — NEVER throw inline, NEVER false-green. The
-    // mandatory Gate-A backstop (reporter.js) is the signal that reds CI.
+    // mandatory reporter-gate backstop (reporter.js) is the signal that reds CI.
     if (isAuthFailure(result && result.error)) {
       emitNoVerdict(identity, 'token cannot read comparison results (auth failure)');
       if (!_tokenCapabilityNotified) {
@@ -134,7 +134,7 @@ function classifySyncResult(result, identity = {}, opts = {}) {
     return { throw: false, message: `Percy: no verdict (${reason}) — gate will decide`, outcome: 'no_verdict' };
   }
 
-  // KD7 — first build is review-only. Checked BEFORE the diff branch: build #1 diffs are
+  // First build is review-only. Checked BEFORE the diff branch: build #1 diffs are
   // baseline-establishment noise, never a regression → never throw.
   if (opts.isFirstBuild) {
     return { throw: false, message: 'Percy: first build — review-only (diffs are baseline noise)', outcome: 'first_build' };

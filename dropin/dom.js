@@ -51,7 +51,7 @@ function resolvePageAndLocator(pageOrLocator) {
 // `percySnapshot`. Returns percySnapshot's return value (the postSnapshot response data — the
 // sync verdict when `sync` is set, undefined otherwise or on a swallowed error; the sync
 // classifier owns the undefined case). Never throws after the marker is set — percySnapshot
-// catches its own errors (D3), and marker cleanup is `finally`-guarded. `deps` is injectable
+// catches its own errors, and marker cleanup is `finally`-guarded. `deps` is injectable
 // for tests.
 async function snapshotViaPercy(pageOrLocator, name, { width, sync } = {}, options = {}, deps = {}) {
   const percySnapshot = deps.percySnapshot || rootPercySnapshot;

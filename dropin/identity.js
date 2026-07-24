@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 
-// Unit 3 / R6 — the SINGLE source of snapshot-identity truth, shared by the head-capture override
+// The SINGLE source of snapshot-identity truth, shared by the head-capture override
 // (index.js) and the committed-baseline discovery (baseline/discover.js).
 //
 // Percy pairs a comparison by its identity tuple `(name, browser_family, width)`. For a committed
@@ -98,7 +98,7 @@ function deriveName(nameArg, testInfo) {
   return anonymousStem(titlePath, counters.anon);
 }
 
-// D2 — map a toHaveScreenshot call onto Percy's (name, browser_family, width).
+// Map a toHaveScreenshot call onto Percy's (name, browser_family, width).
 // - name: the sanitized stem Playwright would write on disk (so it pairs with the committed PNG).
 // - browserFamily: the Playwright project name (chromium/firefox/webkit) — the comparison-tag identity.
 // - width: the page viewport width.

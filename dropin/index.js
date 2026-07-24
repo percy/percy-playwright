@@ -2,8 +2,7 @@
 
 // @percy/playwright/dropin — overrides Playwright's toHaveScreenshot() so existing visual tests
 // route through Percy, with one config line and no test rewrites. Requiring this module registers
-// the override globally (Q3-proven: applies to tests importing `expect` straight from
-// @playwright/test).
+// the override globally — it applies to tests importing `expect` straight from @playwright/test.
 //
 // Capture dispatch is AUTOMATIC, by the Percy PROJECT TYPE (the token):
 //   • WEB project → the SDK's own `percySnapshot` serialized-DOM flow (dom.js seam adds Locator
@@ -19,17 +18,17 @@
 // runs), and `percy playwright:setup-baseline` does the same explicitly on established projects
 // (see dropin/baseline/provider.js + commands/setup-baseline.mjs).
 //
-// Behaviour (per plan):
-//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seam (KD4): the flow returns data;
+// Behaviour:
+//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seam: the flow returns data;
 //     index.js decides whether to pass/throw based on the active mode:
-//       - async always-pass (D6, default): never throw; verdict deferred to Percy review.
-//       - compat (D6/KD5): run the NATIVE matcher's throw semantics (missing-baseline suppressed).
-//       - sync (D10/KD14): await the per-comparison verdict; throw inline ONLY on verdict+diff.
-//   • D3: a Percy *error* NEVER fails the suite (try/catch + log.debug) — in every mode.
-//   • Native fallback (D7/Unit 6): if Percy is disabled at the START of the run, the WHOLE run goes
+//       - async always-pass (default): never throw; verdict deferred to Percy review.
+//       - compat: run the NATIVE matcher's throw semantics (missing-baseline suppressed).
+//       - sync: await the per-comparison verdict; throw inline ONLY on verdict+diff.
+//   • A Percy *error* NEVER fails the suite (try/catch + log.debug) — in every mode.
+//   • Native fallback: if Percy is disabled at the START of the run, the WHOLE run goes
 //     native (latched once) so the suite behaves exactly as pre-install.
 //
-// The three modes are MUTUALLY EXCLUSIVE and resolved at config-load (Unit 7 / src/config.js).
+// The three modes are MUTUALLY EXCLUSIVE and resolved at config-load (config.js).
 const { expect: baseExpect, test } = require('@playwright/test');
 const utils = require('@percy/sdk-utils');
 const { captureFullOverride } = require('./capture');
@@ -51,7 +50,7 @@ const { pngDimensions } = require('./png');
 const log = utils.logger('playwright-dropin');
 
 // Capture Playwright's ORIGINAL toHaveScreenshot BEFORE we override the slot — the native-fallback
-// (D7) and compat-mode (D6) paths invoke it. Must happen prior to the override registration below.
+// and compat-mode paths invoke it. Must happen prior to the override registration below.
 const nativeMatcher = fallback.captureNativeMatcher(baseExpect);
 
 // Pristine expect snapshot for native delegation. `extend()` COPIES userMatchers at call time, so a
@@ -66,13 +65,10 @@ function currentTestInfo() {
   try { return test.info(); } catch { return null; }
 }
 
-// First-build detection for the sync classifier (KD7). With no committed baselines the head run
-// itself becomes the project's baseline: `percy exec` sends the baseline-candidate flag and the
-// API rewrites the build's source iff it is the project's first build. The CLI exposes the decided
-// Run-level native-fallback latch (D7/KD6). isPercyEnabled() is checked once at the FIRST assertion;
+// Run-level native-fallback latch. isPercyEnabled() is checked once at the FIRST assertion;
 // its verdict is latched for the whole run so we never go partial-native mid-run (mid-run blips are
-// retried instead). null = not yet decided. We also run the one-time config validation + footgun
-// rejections (Unit 7) + the mode status line here.
+// retried instead). null = not yet decided. The one-time config validation + footgun rejections
+// and the mode status line also run here.
 let _runMode = null; // 'percy' | 'native'
 let _validated = false;
 let _validationError = null;
@@ -88,7 +84,7 @@ async function resolveRunMode(config) {
 
   // One-time footgun validation + pre-flight checks (mutual exclusion, sync+deferred, token scope).
   // A rejected combination is a CONFIGURATION error the user must fix — it is allowed to throw out
-  // of the matcher (unlike a Percy *runtime* error, which D3 swallows). We only validate when Percy
+  // of the matcher (unlike a Percy *runtime* error, which is swallowed). We only validate when Percy
   // is live (native fallback means none of the modes are in play). The latch is set only on
   // SUCCESS; a rejection is remembered and re-thrown above.
   if (enabled && !_validated) {
@@ -108,7 +104,7 @@ async function resolveRunMode(config) {
     fallback.noteNativeFallback('Percy not enabled at run start');
     _runMode = 'native';
   } else {
-    // Fallback disabled → behave as the old skip-silently path (D6 always-pass, no native compare).
+    // Fallback disabled → behave as the old skip-silently path (always-pass, no native compare).
     _runMode = 'percy';
   }
   return _runMode;
@@ -153,7 +149,7 @@ const percyMatchers = {
       return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: false });
     }
 
-    // (1) Run-level native fallback (D7): Percy disabled at run start → native compare for the
+    // (1) Run-level native fallback: Percy disabled at run start → native compare for the
     // WHOLE run. Native throws on real diffs (pre-install behaviour) but we suppress the
     // missing-baseline first-run throw so installing the drop-in can't red a fresh repo.
     const mode = await resolveRunMode(config);
@@ -161,7 +157,7 @@ const percyMatchers = {
       return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: true });
     }
 
-    // (2) Percy is live. Capture + post. D3: a Percy *error* must never fail the suite.
+    // (2) Percy is live. Capture + post. A Percy *error* must never fail the suite.
     let syncResult;
     try {
       // Always-pass posture for negated calls too: Playwright inverts `pass` for `.not`
@@ -189,7 +185,7 @@ const percyMatchers = {
           // Unparseable PNG — sync mode falls through to the classifier's no-verdict bucket.
           log.debug(`Percy: skipped "${name}" — could not read PNG dimensions from the capture`);
         } else if (config.sync) {
-          // Sync mode: a missing verdict must still red CI via the Gate-A backstop, so the post
+          // Sync mode: a missing verdict must still red CI via the reporter-gate backstop, so the post
           // here is NOT wrapped in retryablePost's swallow — the classifier owns the {error}
           // bucket. Runtime guard: assert sync actually engaged (a deferred-upload that slipped
           // in at runtime would silently turn sync into a no-op).
@@ -211,8 +207,8 @@ const percyMatchers = {
         }
       }
 
-      // (3) Sync mode (D10/KD14): apply the 3-way classifier ABOVE the capture seam. First-build
-      // review-only (KD7) and the {error} no-verdict bucket are handled inside the classifier.
+      // (3) Sync mode: apply the 3-way classifier ABOVE the capture seam. First-build
+      // review-only and the {error} no-verdict bucket are handled inside the classifier.
       if (config.sync) {
         const verdict = classifySyncResult(syncResult, { name, browserFamily, width }, { isFirstBuild: isBaselineBuildRun() });
         if (verdict.throw) {
@@ -222,18 +218,18 @@ const percyMatchers = {
         return { pass: passValue, message: () => verdict.message || '' };
       }
     } catch (err) {
-      // D3: any Percy error (capture, post, classify) is swallowed — never fail the functional
+      // Any Percy error (capture, post, classify) is swallowed — never fail the functional
       // suite on a Percy problem. The async/always-pass and sync paths both land here on error.
       log.debug(`Percy: skipped toHaveScreenshot — ${err.message}`);
     }
 
-    // (4) Compat mode (D6/KD5): preserve native THROW semantics even with Percy on, but suppress
+    // (4) Compat mode: preserve native THROW semantics even with Percy on, but suppress
     // the missing-baseline first-run throw. Runs AFTER the Percy post so the snapshot still uploads.
     if (config.compat) {
       return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: true });
     }
 
-    // (5) Default async always-pass (D6): verdict deferred to Percy's async review.
+    // (5) Default async always-pass: verdict deferred to Percy's async review.
     return { pass: !matcherState.isNot, message: () => '' };
   }
 };
@@ -258,7 +254,7 @@ if (metaSym) {
     'If snapshots do not appear in Percy, this Playwright version is unsupported.');
 }
 
-// Unit 5 — the opt-in gate reporter, exposed for one-line wiring in playwright.config `reporter`.
+// The opt-in gate reporter, exposed for one-line wiring in playwright.config `reporter`.
 const PercyGateReporter = require('./reporter');
 
 module.exports = {
