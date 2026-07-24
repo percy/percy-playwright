@@ -1,5 +1,5 @@
 {
-  "exclude": ["test"],
+  "exclude": ["test", "dropin", "bin"],
   "check-coverage": true,
   "branches": 100,
   "lines": 100,

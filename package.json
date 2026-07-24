@@ -16,14 +16,22 @@
     "index.js",
     "utils.js",
     "cache.js",
+    "dropin",
+    "commands",
     "types/index.d.ts"
   ],
+  "@percy/cli": {
+    "commands": [
+      "commands/setup-baseline.mjs"
+    ],
+    "baselineProvider": "dropin/baseline/provider.js"
+  },
   "engines": {
-    "node": ">=14"
+    "node": ">=16"
   },
   "scripts": {
     "lint": "eslint --ignore-path .gitignore .",
-    "test": "cross-env NODE_ENV=test percy exec --testing -- playwright test",
+    "test": "cross-env NODE_ENV=test percy exec --testing -- playwright test --workers=1",
     "test:coverage": "nyc yarn test",
     "test:types": "tsd"
   },
@@ -31,12 +39,25 @@
     "access": "public",
     "tag": "latest"
   },
+  "dependencies": {
+    "@percy/sdk-utils": "^1.32.0"
+  },
   "peerDependencies": {
-    "playwright-core": ">=1"
+    "playwright-core": ">=1",
+    "@playwright/test": ">=1.49.0",
+    "@percy/cli": ">=1.32.3"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    },
+    "@percy/cli": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@percy/cli": "^1.32.0",
-    "@playwright/test": "^1.24.2",
+    "@playwright/test": "^1.60.0",
     "babel-eslint": "^10.1.0",
     "cross-env": "^7.0.2",
     "eslint": "^7.18.0",
@@ -46,7 +67,7 @@
     "eslint-plugin-promise": "^5.1.0",
     "eslint-plugin-standard": "^5.0.0",
     "nyc": "^15.1.0",
-    "playwright": "^1.24.2",
+    "playwright": "^1.60.0",
     "sinon": "^18.0.1",
     "tsd": "^0.25.0"
   }

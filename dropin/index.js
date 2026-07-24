@@ -1,0 +1,264 @@
+'use strict';
+
+// @percy/playwright/dropin — overrides Playwright's toHaveScreenshot() so existing visual tests
+// route through Percy, with one config line and no test rewrites. Requiring this module registers
+// the override globally — it applies to tests importing `expect` straight from @playwright/test.
+//
+// Capture dispatch is AUTOMATIC, by the Percy PROJECT TYPE (the token):
+//   • WEB project → the SDK's own `percySnapshot` serialized-DOM flow (dom.js seam adds Locator
+//     scoping), rendered server-side by Percy's pipeline.
+//   • APP project → the captured PNG uploads straight through the comparison ingest — no render
+//     flow is triggered, exactly how App Percy ingests screenshots today (capture.js owns the
+//     pixel capture).
+//   • Any other token (automate, generic, ...) is a CONFIGURATION error (validateConfig throws,
+//     like other SDKs' wrong-token errors).
+//
+// Baseline seeding is CLI-DRIVEN and never happens in-process here: `percy exec` uploads the
+// committed Playwright PNGs as an auto-approved build #1 on an empty project (before any test
+// runs), and `percy playwright:setup-baseline` does the same explicitly on established projects
+// (see dropin/baseline/provider.js + commands/setup-baseline.mjs).
+//
+// Behaviour:
+//   • Throw policy is CENTRALIZED HERE, ABOVE the capture seam: the flow returns data;
+//     index.js decides whether to pass/throw based on the active mode:
+//       - async always-pass (default): never throw; verdict deferred to Percy review.
+//       - compat: run the NATIVE matcher's throw semantics (missing-baseline suppressed).
+//       - sync: await the per-comparison verdict; throw inline ONLY on verdict+diff.
+//   • A Percy *error* NEVER fails the suite (try/catch + log.debug) — in every mode.
+//   • Native fallback: if Percy is disabled at the START of the run, the WHOLE run goes
+//     native (latched once) so the suite behaves exactly as pre-install.
+//
+// The three modes are MUTUALLY EXCLUSIVE and resolved at config-load (config.js).
+const { expect: baseExpect, test } = require('@playwright/test');
+const utils = require('@percy/sdk-utils');
+const { captureFullOverride } = require('./capture');
+const { snapshotViaPercy } = require('./dom');
+const { deriveIdentity } = require('./identity');
+const fallback = require('./fallback');
+const { classifySyncResult } = require('./sync');
+const { loadConfig, validateConfig, assertSyncEngaged, modeStatusLine } = require('./config');
+
+const { percyProjectType, isBaselineBuildRun } = require('./percy-info');
+
+// Client/environment attribution comes from the ROOT SDK module — the single source (the root
+// exports CLIENT_INFO/ENV_INFO and sdk-utils folds them into the request user agent). Required
+// lazily: the drop-in loads inside playwright.config before the runner finishes booting, and must
+// not pull the full SDK at config-load time (same reason dom.js requires the root lazily).
+let _root;
+function versionInfo() { return (_root = _root || require('../index.js')); }
+const { pngDimensions } = require('./png');
+const log = utils.logger('playwright-dropin');
+
+// Capture Playwright's ORIGINAL toHaveScreenshot BEFORE we override the slot — the native-fallback
+// and compat-mode paths invoke it. Must happen prior to the override registration below.
+const nativeMatcher = fallback.captureNativeMatcher(baseExpect);
+
+// Pristine expect snapshot for native delegation. `extend()` COPIES userMatchers at call time, so a
+// chain created from this instance keeps dispatching to the BUILT-IN toHaveScreenshot even after we
+// inject our override into the shared instance below. Subject binding, matcher state and step
+// reporting all come from Playwright itself. (`captureNativeMatcher`'s raw-slot grab returns a
+// closure with the subject already bound to `undefined` on Playwright >=1.49's expect, so it cannot
+// be applied to a real page — kept only as a shape probe / legacy export.)
+const nativeExpect = baseExpect.extend({});
+
+function currentTestInfo() {
+  try { return test.info(); } catch { return null; }
+}
+
+// Run-level native-fallback latch. isPercyEnabled() is checked once at the FIRST assertion;
+// its verdict is latched for the whole run so we never go partial-native mid-run (mid-run blips are
+// retried instead). null = not yet decided. The one-time config validation + footgun rejections
+// and the mode status line also run here.
+let _runMode = null; // 'percy' | 'native'
+let _validated = false;
+let _validationError = null;
+async function resolveRunMode(config) {
+  if (_runMode) return _runMode;
+  // A latched configuration rejection re-throws on EVERY assertion — otherwise only the first
+  // assertion would surface the config error and the rest of the run would proceed silently with
+  // the rejected config.
+  if (_validationError) throw _validationError;
+
+  // Fallback can be disabled by config (then we stay in Percy mode and simply no-op when disabled).
+  const enabled = await utils.isPercyEnabled().catch(() => false);
+
+  // One-time footgun validation + pre-flight checks (mutual exclusion, sync+deferred, token scope).
+  // A rejected combination is a CONFIGURATION error the user must fix — it is allowed to throw out
+  // of the matcher (unlike a Percy *runtime* error, which is swallowed). We only validate when Percy
+  // is live (native fallback means none of the modes are in play). The latch is set only on
+  // SUCCESS; a rejection is remembered and re-thrown above.
+  if (enabled && !_validated) {
+    try {
+      await validateConfig(config);
+    } catch (err) {
+      _validationError = err;
+      throw err;
+    }
+    _validated = true;
+    log.info(modeStatusLine(config));
+  }
+
+  if (enabled) {
+    _runMode = 'percy';
+  } else if (config.fallback) {
+    fallback.noteNativeFallback('Percy not enabled at run start');
+    _runMode = 'native';
+  } else {
+    // Fallback disabled → behave as the old skip-silently path (always-pass, no native compare).
+    _runMode = 'percy';
+  }
+  return _runMode;
+}
+
+// Test-only reset of the latch + native-notice (the harness re-requires a fresh process in CI, but
+// unit tests in-process need to flip run state between cases).
+function _resetRunState() { _runMode = null; _validated = false; _validationError = null; fallback._resetNotice(); }
+
+// Build the postComparison options for a captured tile (APP projects). `sync` is added only in
+// sync mode so the CLI awaits the per-comparison verdict.
+function comparisonOptions({ name, browserFamily, width, pngBuffer, sync }) {
+  // percy-api requires tag height (screenshot records validate presence); width stays the
+  // IDENTITY width (viewport) so baseline↔head pairing is stable, height comes from the actual
+  // PNG bytes (accurate for both page and element captures).
+  const dims = pngDimensions(pngBuffer);
+  // percy-api validates tag height presence — a heightless post is a guaranteed server-side
+  // reject the run never sees. An unparseable PNG skips the post instead (caller logs it).
+  if (!dims) return null;
+  const options = {
+    name,
+    clientInfo: versionInfo().CLIENT_INFO,
+    environmentInfo: versionInfo().ENV_INFO,
+    tag: { name: browserFamily, browserName: browserFamily, width, height: dims.height },
+    tiles: [{ content: pngBuffer.toString('base64') }]
+  };
+  if (sync) options.sync = true;
+  return options;
+}
+
+const percyMatchers = {
+  async toHaveScreenshot(pageOrLocator, nameOrOptions, maybeOptions) {
+    const config = loadConfig();
+    const matcherState = this;
+    const nativeArgs = [pageOrLocator, nameOrOptions, maybeOptions];
+
+    // (0) Deliberate opt-out (`enabled: false` / PERCY_DROPIN_DISABLE=true): run Playwright's
+    // ORIGINAL matcher, PURE native — including the missing-baseline throw (the user chose native
+    // semantics; this is not the protective fallback below). percySnapshot()/percyScreenshot()
+    // keep working under `percy exec` — the override simply steps aside.
+    if (config.enabled === false) {
+      return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: false });
+    }
+
+    // (1) Run-level native fallback: Percy disabled at run start → native compare for the
+    // WHOLE run. Native throws on real diffs (pre-install behaviour) but we suppress the
+    // missing-baseline first-run throw so installing the drop-in can't red a fresh repo.
+    const mode = await resolveRunMode(config);
+    if (mode === 'native') {
+      return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: true });
+    }
+
+    // (2) Percy is live. Capture + post. A Percy *error* must never fail the suite.
+    let syncResult;
+    try {
+      // Always-pass posture for negated calls too: Playwright inverts `pass` for `.not`
+      // chains, so a hardcoded `pass: true` would FAIL every `.not.toHaveScreenshot()`.
+      const passValue = !matcherState.isNot;
+
+      if (!(await utils.isPercyEnabled())) {
+        return { pass: passValue, message: () => 'Percy is disabled — snapshot skipped' };
+      }
+
+      const nameArg = typeof nameOrOptions === 'string' || Array.isArray(nameOrOptions) ? nameOrOptions : undefined;
+      const options = (typeof nameOrOptions === 'object' && !Array.isArray(nameOrOptions) ? nameOrOptions : maybeOptions) || {};
+
+      const { name, browserFamily, width } = deriveIdentity(pageOrLocator, nameArg, currentTestInfo());
+
+      // Automatic dispatch by project type (validateConfig has already rejected anything that is
+      // neither web nor app, so this is a clean two-way switch).
+      if (percyProjectType() === 'app') {
+        // APP project — upload the captured PNG straight through the comparison ingest; no render
+        // flow is triggered server-side (exactly how App Percy ingests screenshots).
+        const pngBuffer = await captureFullOverride(pageOrLocator, options);
+        const postOptions = comparisonOptions({ name, browserFamily, width, pngBuffer, sync: config.sync });
+
+        if (!postOptions) {
+          // Unparseable PNG — sync mode falls through to the classifier's no-verdict bucket.
+          log.debug(`Percy: skipped "${name}" — could not read PNG dimensions from the capture`);
+        } else if (config.sync) {
+          // Sync mode: a missing verdict must still red CI via the reporter-gate backstop, so the post
+          // here is NOT wrapped in retryablePost's swallow — the classifier owns the {error}
+          // bucket. Runtime guard: assert sync actually engaged (a deferred-upload that slipped
+          // in at runtime would silently turn sync into a no-op).
+          syncResult = await utils.postComparison(postOptions);
+          assertSyncEngaged(config);
+        } else {
+          await fallback.retryablePost(() => utils.postComparison(postOptions));
+        }
+      } else {
+        // WEB project — the SDK's own percySnapshot (serialized DOM, server-side render), via the
+        // dom.js seam that adds Locator scoping + viewport identity pinning. percySnapshot
+        // swallows its own errors and returns the postSnapshot data; an undefined result in sync
+        // mode lands in the classifier's no-verdict bucket (never a false-green — the gate
+        // backstops).
+        const response = await snapshotViaPercy(pageOrLocator, name, { width, sync: config.sync }, options);
+        if (config.sync) {
+          assertSyncEngaged(config);
+          syncResult = response;
+        }
+      }
+
+      // (3) Sync mode: apply the 3-way classifier ABOVE the capture seam. First-build
+      // review-only and the {error} no-verdict bucket are handled inside the classifier.
+      if (config.sync) {
+        const verdict = classifySyncResult(syncResult, { name, browserFamily, width }, { isFirstBuild: isBaselineBuildRun() });
+        if (verdict.throw) {
+          // Real regression on a non-first build → fail THIS assertion inline (dashboard URL in msg).
+          return { pass: false, message: () => verdict.message };
+        }
+        return { pass: passValue, message: () => verdict.message || '' };
+      }
+    } catch (err) {
+      // Any Percy error (capture, post, classify) is swallowed — never fail the functional
+      // suite on a Percy problem. The async/always-pass and sync paths both land here on error.
+      log.debug(`Percy: skipped toHaveScreenshot — ${err.message}`);
+    }
+
+    // (4) Compat mode: preserve native THROW semantics even with Percy on, but suppress
+    // the missing-baseline first-run throw. Runs AFTER the Percy post so the snapshot still uploads.
+    if (config.compat) {
+      return fallback.runNativeViaExpect(nativeExpect, matcherState, nativeArgs, { suppressMissingBaseline: true });
+    }
+
+    // (5) Default async always-pass: verdict deferred to Percy's async review.
+    return { pass: !matcherState.isNot, message: () => '' };
+  }
+};
+
+// Register the override on the SHARED expect instance tests import. Playwright's public
+// `expect.extend()` SILENTLY SKIPS matcher names that collide with built-ins on the shared instance
+// (1.60: `if (name in allBuiltinMatchers) continue`; 1.49: qualified-name shadowing) — the override
+// only takes effect on the NEW instance extend() returns, which tests never import. To keep the
+// zero-test-change promise we inject the matcher into the shared instance's userMatchers via its
+// META_INFO symbol: call-time dispatch spreads `{...allBuiltinMatchers, ...userMatchers}`, so
+// userMatchers win. Falls back to plain extend() (custom-name semantics) if the internal shape ever
+// changes, and warns — a silent no-op here means NO snapshot ever reaches Percy while CI stays
+// green, the worst failure mode this package has.
+const metaSym = Object.getOwnPropertySymbols(baseExpect)
+  .find(s => baseExpect[s] && typeof baseExpect[s] === 'object' && baseExpect[s].userMatchers);
+if (metaSym) {
+  baseExpect[metaSym].userMatchers.toHaveScreenshot = percyMatchers.toHaveScreenshot;
+} else {
+  baseExpect.extend(percyMatchers);
+  log.warn('Percy: could not inject the toHaveScreenshot override into this Playwright version — ' +
+    'falling back to expect.extend(), which may be ignored for built-in matcher names. ' +
+    'If snapshots do not appear in Percy, this Playwright version is unsupported.');
+}
+
+// The opt-in gate reporter, exposed for one-line wiring in playwright.config `reporter`.
+const PercyGateReporter = require('./reporter');
+
+module.exports = {
+  PercyGateReporter,
+  _resetRunState,
+  nativeMatcher
+};
