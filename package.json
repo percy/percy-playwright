@@ -31,7 +31,7 @@
   },
   "scripts": {
     "lint": "eslint --ignore-path .gitignore .",
-    "test": "cross-env NODE_ENV=test percy exec --testing -- playwright test",
+    "test": "cross-env NODE_ENV=test percy exec --testing -- playwright test --workers=1",
     "test:coverage": "nyc yarn test",
     "test:types": "tsd"
   },
