@@ -408,15 +408,11 @@ test.describe('percySnapshot', () => {
     await helpers.test('config', { config: [1280], mobile: [390] });
     
     const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
-    
-    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
-    
-    // Verify viewport was resized for responsive capture with mobile widths
-    expect(setViewportSizeSpy.called).toBe(true);
-    
-    // Shared testing server: logs from parallel workers land asynchronously — poll like the
-    // sibling specs instead of asserting a single racy read.
+
+    // Shared testing server: another worker's reset can wipe the log buffer between our post
+    // and the read — retry the act+assert together so a wiped buffer is repopulated.
     await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
       const logs = await helpers.get('logs');
       expect(logs).toEqual(expect.arrayContaining([
         'Snapshot found: Snapshot 1',
@@ -424,7 +420,10 @@ test.describe('percySnapshot', () => {
         expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
         expect.stringMatching(/environmentInfo: playwright\/.+/)
       ]));
-    }).toPass({ timeout: 15000 });
+    }).toPass({ timeout: 20000 });
+
+    // Verify viewport was resized for responsive capture with mobile widths
+    expect(setViewportSizeSpy.called).toBe(true);
   });
 
   test('multiDOM should not run when deferUploads is true', async ({ page }) => {
