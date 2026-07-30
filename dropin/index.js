@@ -10,8 +10,11 @@
 //   • APP project → the captured PNG uploads straight through the comparison ingest — no render
 //     flow is triggered, exactly how App Percy ingests screenshots today (capture.js owns the
 //     pixel capture).
-//   • Any other token (automate, generic, ...) is a CONFIGURATION error (validateConfig throws,
-//     like other SDKs' wrong-token errors).
+//   • AUTOMATE project → the SDK's own `percyScreenshot` Percy-on-Automate flow (automate.js
+//     seam) — the capture happens on the remote BrowserStack browser via the Automate session,
+//     so the suite must be running on BrowserStack.
+//   • Any other token (generic, ...) is a CONFIGURATION error (validateConfig throws, like other
+//     SDKs' wrong-token errors).
 //
 // Baseline seeding is CLI-DRIVEN and never happens in-process here: `percy exec` uploads the
 // committed Playwright PNGs as an auto-approved build #1 on an empty project (before any test
@@ -33,6 +36,7 @@ const { expect: baseExpect, test } = require('@playwright/test');
 const utils = require('@percy/sdk-utils');
 const { captureFullOverride } = require('./capture');
 const { snapshotViaPercy } = require('./dom');
+const { screenshotViaAutomate, _resetNotices: _resetAutomateNotices } = require('./automate');
 const { deriveIdentity } = require('./identity');
 const fallback = require('./fallback');
 const { classifySyncResult } = require('./sync');
@@ -112,7 +116,7 @@ async function resolveRunMode(config) {
 
 // Test-only reset of the latch + native-notice (the harness re-requires a fresh process in CI, but
 // unit tests in-process need to flip run state between cases).
-function _resetRunState() { _runMode = null; _validated = false; _validationError = null; fallback._resetNotice(); }
+function _resetRunState() { _runMode = null; _validated = false; _validationError = null; fallback._resetNotice(); _resetAutomateNotices(); }
 
 // Build the postComparison options for a captured tile (APP projects). `sync` is added only in
 // sync mode so the CLI awaits the per-comparison verdict.
@@ -173,8 +177,8 @@ const percyMatchers = {
 
       const { name, browserFamily, width } = deriveIdentity(pageOrLocator, nameArg, currentTestInfo());
 
-      // Automatic dispatch by project type (validateConfig has already rejected anything that is
-      // neither web nor app, so this is a clean two-way switch).
+      // Automatic dispatch by project type (validateConfig has already rejected anything outside
+      // web/app/automate, so this is a clean three-way switch).
       if (percyProjectType() === 'app') {
         // APP project — upload the captured PNG straight through the comparison ingest; no render
         // flow is triggered server-side (exactly how App Percy ingests screenshots).
@@ -193,6 +197,20 @@ const percyMatchers = {
           assertSyncEngaged(config);
         } else {
           await fallback.retryablePost(() => utils.postComparison(postOptions));
+        }
+      } else if (percyProjectType() === 'automate') {
+        // AUTOMATE project — hand off to the SDK's own percyScreenshot (Percy-on-Automate) via
+        // the automate.js seam: the CLI captures on the remote BrowserStack browser through the
+        // session, so the comparison tag identity comes from the real session — the derived
+        // (browserFamily, width) identity applies only to the snapshot NAME here. percyScreenshot
+        // swallows its own runtime errors and returns the comparison detail in sync mode; an
+        // undefined result lands in the classifier's no-verdict bucket (gate backstops). The one
+        // error the seam DOES throw — automate token on a non-BrowserStack browser — is a
+        // configuration error and is rethrown out of the matcher below.
+        const response = await screenshotViaAutomate(pageOrLocator, name, { sync: config.sync }, options);
+        if (config.sync) {
+          assertSyncEngaged(config);
+          syncResult = response;
         }
       } else {
         // WEB project — the SDK's own percySnapshot (serialized DOM, server-side render), via the
@@ -218,8 +236,13 @@ const percyMatchers = {
         return { pass: passValue, message: () => verdict.message || '' };
       }
     } catch (err) {
-      // Any Percy error (capture, post, classify) is swallowed — never fail the functional
-      // suite on a Percy problem. The async/always-pass and sync paths both land here on error.
+      // A CONFIGURATION error (wrong setup the user must fix — e.g. an automate token on a
+      // non-BrowserStack browser) is allowed to fail the assertion, same as validateConfig's
+      // rejections above. Per-assertion, not latched: hybrid suites keep working for the
+      // correctly-configured projects.
+      if (err.isConfigurationError) throw err;
+      // Any Percy *runtime* error (capture, post, classify) is swallowed — never fail the
+      // functional suite on a Percy problem. The async/always-pass and sync paths both land here.
       log.debug(`Percy: skipped toHaveScreenshot — ${err.message}`);
     }
 

@@ -28,12 +28,13 @@ export const setupBaseline = command('setup-baseline', {
   if (!percy) exit(1, 'Percy is disabled');
 
   // Web projects seed rendered snapshots; app projects seed raw comparison uploads (no render
-  // flow — like App Percy). Anything else is a wrong token.
-  let { SUPPORTED_PROJECT_TYPES, wrongTokenError } = await import('../dropin/config.js')
+  // flow — like App Percy). Automate projects are drop-in supported but NOT seedable — their
+  // baseline comes from the first remote run — and anything else is a wrong token.
+  let { SEEDABLE_PROJECT_TYPES, seedingUnsupportedError } = await import('../dropin/config.js')
     .then(m => m.default || m);
   let projectType = percy.client.tokenType();
-  if (!SUPPORTED_PROJECT_TYPES.includes(projectType)) {
-    exit(1, wrongTokenError(projectType, { context: 'playwright:setup-baseline' }));
+  if (!SEEDABLE_PROJECT_TYPES.includes(projectType)) {
+    exit(1, seedingUnsupportedError(projectType));
   }
 
   // The provider owns all Playwright knowledge (config resolution, snapshot discovery, identity

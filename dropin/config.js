@@ -100,21 +100,36 @@ function loadConfig({ rootDir = process.cwd(), force = false } = {}) {
 
 // The drop-in supports exactly these Percy project types; shared with the setup-baseline
 // command so the wrong-token wording stays identical everywhere.
-const SUPPORTED_PROJECT_TYPES = ['web', 'app'];
+const SUPPORTED_PROJECT_TYPES = ['web', 'app', 'automate'];
+
+// Committed local screenshots can never pair with remote Automate captures (the comparison tag
+// identity comes from the real BrowserStack session), so baseline SEEDING is a strict subset of
+// the supported types — an Automate project builds its baseline from its first run instead.
+const SEEDABLE_PROJECT_TYPES = ['web', 'app'];
 
 function wrongTokenError(projectType, { context = 'Percy Playwright drop-in' } = {}) {
-  return `${context} requires a web or app project token — the configured token is ${
-    projectType === 'automate' ? 'for a Percy on Automate' : `for a "${projectType}"`
-  } project. Use a web/app project token, or use percyScreenshot() directly for Automate.`;
+  return `${context} requires a web, app, or automate project token — the configured token is ` +
+    `for a "${projectType}" project. Use a token from a Percy web, App Percy, or ` +
+    'Percy on Automate project.';
+}
+
+function seedingUnsupportedError(projectType, { context = 'playwright:setup-baseline' } = {}) {
+  return `${context} seeds committed screenshots as the Percy baseline, which applies to web ` +
+    `and app projects only — the configured token is for a${
+      projectType === 'automate' ? ' Percy on Automate' : ` "${projectType}"`
+    } project. ${projectType === 'automate'
+      ? 'Automate projects build their baseline from the first run on BrowserStack; no seeding is needed.'
+      : 'Use a web or app project token.'}`;
 }
 
 // Async footgun validation + pre-flight checks. Call once at run start (index.js resolveRunMode /
 // globalSetup). Throws a clear error on a rejected combination so the user fixes their config rather
 // than silently getting the wrong behaviour. Returns the validated config.
 async function validateConfig(config = loadConfig()) {
-  // The drop-in supports WEB projects (serialized-DOM snapshots, rendered server-side) and APP
+  // The drop-in supports WEB projects (serialized-DOM snapshots, rendered server-side), APP
   // projects (raw screenshot upload through the comparison ingest — no render flow, like App
-  // Percy). Any other token is a configuration error the user must fix — same posture as the
+  // Percy) and AUTOMATE projects (remote capture through the BrowserStack session, like Percy on
+  // Automate). Any other token is a configuration error the user must fix — same posture as the
   // other SDKs' wrong-token errors. `percy.type` is populated by the isPercyEnabled()
   // healthcheck that always precedes validation.
   const projectType = utils.percy && utils.percy.type;
@@ -189,7 +204,9 @@ function modeStatusLine(config = loadConfig()) {
   else if (config.compat) mode = 'compat';
   const gate = config.sync ? 'fail-on-changes' : config.gate;
   const type = (utils.percy && utils.percy.type) || 'web';
-  const capture = type === 'app' ? 'screenshot (app)' : 'snapshot (web)';
+  const capture = type === 'app'
+    ? 'screenshot (app)'
+    : type === 'automate' ? 'remote screenshot (automate)' : 'snapshot (web)';
   return `Percy drop-in: mode=${mode} | capture=${capture} | gate=${gate}`;
 }
 
@@ -197,7 +214,9 @@ function _reset() { _cache = null; }
 
 module.exports = {
   SUPPORTED_PROJECT_TYPES,
+  SEEDABLE_PROJECT_TYPES,
   wrongTokenError,
+  seedingUnsupportedError,
   loadConfig,
   validateConfig,
   assertSyncEngaged,

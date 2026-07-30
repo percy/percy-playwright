@@ -8,7 +8,8 @@
 //
 // Dispatch is automatic by project type: web → percySnapshot web snapshot (the testing server
 // reports type 'web' — the token-less default); app → raw-PNG comparison upload (no render
-// flow); anything else (automate, ...) is a configuration error.
+// flow); automate → percyScreenshot remote capture through the BrowserStack session; anything
+// else (generic, ...) is a configuration error.
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -18,6 +19,7 @@ import { test, expect } from '@playwright/test';
 import dropin from '../dropin/index.js';
 import dropinConfig from '../dropin/config.js';
 import dropinDom from '../dropin/dom.js';
+import dropinAutomate from '../dropin/automate.js';
 import identity from '../dropin/identity.js';
 import paths from '../dropin/paths.js';
 import provider from '../dropin/baseline/provider.js';
@@ -126,19 +128,40 @@ test.describe('toHaveScreenshot drop-in (dispatch)', () => {
     }
   });
 
-  test('an automate token is a configuration error (like other SDKs)', async ({ page }) => {
+  test('an unsupported token type is a configuration error (like other SDKs)', async ({ page }) => {
     // Pin the cached project type, then reset the run latch so validation re-runs.
+    await utils.isPercyEnabled();
+    utils.percy.type = 'generic';
+    _resetRunState();
+
+    try {
+      await expect(expect(page).toHaveScreenshot('dropin-wrong-token.png'))
+        .rejects.toThrow(/requires a web, app, or automate project token/);
+      // The rejection is LATCHED: every later assertion re-throws too — a config error must
+      // never degrade into a silent always-pass run after the first test.
+      await expect(expect(page).toHaveScreenshot('dropin-wrong-token-2.png'))
+        .rejects.toThrow(/requires a web, app, or automate project token/);
+    } finally {
+      utils.percy.type = 'web';
+      _resetRunState();
+    }
+  });
+
+  test('an automate token on a local browser fails with a clear configuration error', async ({ page }) => {
+    // Automate is a SUPPORTED type (validation passes), but the capture needs a BrowserStack
+    // Automate session — a local browser has none, and that must surface as a loud, actionable
+    // error instead of a silent always-pass run with zero Percy traffic.
     await utils.isPercyEnabled();
     utils.percy.type = 'automate';
     _resetRunState();
 
     try {
-      await expect(expect(page).toHaveScreenshot('dropin-wrong-token.png'))
-        .rejects.toThrow(/requires a web or app project token/);
-      // The rejection is LATCHED: every later assertion re-throws too — a config error must
-      // never degrade into a silent always-pass run after the first test.
-      await expect(expect(page).toHaveScreenshot('dropin-wrong-token-2.png'))
-        .rejects.toThrow(/requires a web or app project token/);
+      await expect(expect(page).toHaveScreenshot('dropin-automate-local.png'))
+        .rejects.toThrow(/not a BrowserStack Automate session/);
+      // Per-assertion, NOT latched — hybrid suites (some projects on BrowserStack, some local)
+      // must keep working for the remote ones, so each assertion re-detects its own session.
+      await expect(expect(page).toHaveScreenshot('dropin-automate-local-2.png'))
+        .rejects.toThrow(/not a BrowserStack Automate session/);
     } finally {
       utils.percy.type = 'web';
       _resetRunState();
@@ -198,6 +221,74 @@ test.describe('drop-in units', () => {
     expect(receivedArgs.options.widths).toEqual([900]);
     expect(receivedArgs.options.minHeight).toBe(page.viewportSize().height);
     expect(receivedArgs.options.sync).toBe(true);
+  });
+
+  test('screenshotViaAutomate delegates to the repo percyScreenshot with the POA option mapping', async () => {
+    dropinAutomate._resetNotices();
+    const calls = [];
+    const fakePage = { kind: 'page' };
+    const locator = { page: () => fakePage };
+
+    const result = await dropinAutomate.screenshotViaAutomate(
+      locator, 'automate-shot', { sync: true }, { fullPage: true, mask: ['ignored'], clip: { x: 0 } }, {
+        sessionDetails: async page => {
+          expect(page, 'session details must be read from the resolved Page').toBe(fakePage);
+          return { hashed_id: 'abc123' };
+        },
+        percyScreenshot: async (page, name, options) => {
+          calls.push({ page, name, options });
+          return { verdict: 'ok' };
+        }
+      });
+
+    expect(result).toEqual({ verdict: 'ok' });
+    expect(calls.length).toBe(1);
+    // Locator subjects resolve to their page (remote capture has no element scoping)...
+    expect(calls[0].page).toBe(fakePage);
+    expect(calls[0].name).toBe('automate-shot');
+    // ...fullPage and sync map through; local-only pixel options (mask/clip/…) never do.
+    expect(calls[0].options).toEqual({ fullPage: true, sync: true });
+  });
+
+  test('screenshotViaAutomate raises a configuration error off BrowserStack', async () => {
+    dropinAutomate._resetNotices();
+    const deps = {
+      sessionDetails: async () => { throw new Error('not a bstack browser'); },
+      percyScreenshot: async () => { throw new Error('must not be reached'); }
+    };
+
+    const err = await dropinAutomate
+      .screenshotViaAutomate({ kind: 'page' }, 'shot', {}, {}, deps)
+      .catch(e => e);
+    expect(err.message).toMatch(/not a BrowserStack Automate session/);
+    // The marker routes it through the matcher's config-error rethrow (fails the assertion)
+    // instead of the runtime-error swallow (silent always-pass).
+    expect(err.isConfigurationError).toBe(true);
+
+    // A session answer without a session id (defensive) is the same configuration error.
+    const noId = await dropinAutomate
+      .screenshotViaAutomate({ kind: 'page' }, 'shot', {}, {}, { ...deps, sessionDetails: async () => ({}) })
+      .catch(e => e);
+    expect(noId.isConfigurationError).toBe(true);
+  });
+
+  test('automate wording: supported types, seeding gate and status line', () => {
+    expect(dropinConfig.SUPPORTED_PROJECT_TYPES).toEqual(['web', 'app', 'automate']);
+    expect(dropinConfig.SEEDABLE_PROJECT_TYPES).toEqual(['web', 'app']);
+    expect(dropinConfig.wrongTokenError('generic'))
+      .toMatch(/requires a web, app, or automate project token/);
+    expect(dropinConfig.seedingUnsupportedError('automate'))
+      .toMatch(/build their baseline from the first run/);
+    expect(dropinConfig.seedingUnsupportedError('generic'))
+      .toMatch(/Use a web or app project token/);
+
+    utils.percy.type = 'automate';
+    try {
+      expect(dropinConfig.modeStatusLine({ gate: 'informational' }))
+        .toContain('capture=remote screenshot (automate)');
+    } finally {
+      utils.percy.type = 'web';
+    }
   });
 });
 
