@@ -61,6 +61,74 @@ $ percy exec -- node script.js
 - `options` - [See per-snapshot configuration options](https://www.browserstack.com/docs/percy/take-percy-snapshots/overview#per-snapshot-configuration)
 
 
+## toHaveScreenshot drop-in
+
+Route your existing Playwright `expect(...).toHaveScreenshot()` assertions through Percy with
+**one config line and no test changes**:
+
+```js
+// playwright.config.js
+require('@percy/playwright/dropin'); // registers the toHaveScreenshot override
+
+module.exports = defineConfig({ /* your config */ });
+```
+
+```bash
+PERCY_TOKEN=<web-project-token> npx percy exec -- npx playwright test
+```
+
+Just the standard `percy exec` — no wrapper, no extra flags. Capture dispatches automatically by
+your **project token**:
+
+| Project | Flow |
+|---|---|
+| **Web** | Every `toHaveScreenshot()` becomes a Percy web snapshot: the live page is serialized with the same capture `percySnapshot()` uses (readiness gate, responsive capture, cross-origin iframes) and Percy renders it server-side. Locator subjects become element-scoped snapshots. |
+| **App** | The captured PNG uploads straight through the comparison ingest — no render flow, exactly how App Percy ingests screenshots. |
+| anything else | A clear wrong-token configuration error (use `percyScreenshot()` for Automate). |
+
+The assertion **always passes locally** — the visual verdict moves to Percy's review UI, and a
+missing/invalid token or any Percy error **never fails your suite** (the whole run falls back to
+native `toHaveScreenshot`).
+
+### Your committed baselines become the first build — automatically
+
+On a **new (empty) Percy project**, `percy exec` detects this package plus the Playwright baseline
+PNGs already committed in your repo (`*-snapshots` directories) and establishes the baseline before
+your tests run:
+
+1. **Build #1** — your committed screenshots are uploaded directly (the suite does NOT run for
+   this) and the build is auto-approved server-side: these are the baselines you've already
+   blessed.
+2. **Build #2** — your actual command runs and diffs against that baseline immediately.
+
+With no committed screenshots, the first run itself becomes the auto-approved baseline (matching
+native Playwright's "first run writes the baselines" behavior). The Percy API decides first-ness
+from the project token — the flag can never re-baseline an established project.
+
+### Existing projects: `percy playwright:setup-baseline`
+
+On a project that already has builds, `percy exec` never re-baselines — it prints a notice and
+carries on. To deliberately (re-)establish the baseline from your committed screenshots (no tests
+run, auto-approved):
+
+```bash
+PERCY_TOKEN=<web-project-token> npx percy playwright:setup-baseline
+```
+
+An optional CI gate is available via `reporter: [['@percy/playwright/dropin/reporter']]` with
+`{ "gate": "fail-on-changes" }`.
+
+### Disabling the drop-in
+
+To keep `toHaveScreenshot()` **fully native** (local pixel compare, including the
+missing-baseline behavior) while still using `percySnapshot()`/`percyScreenshot()` under
+`percy exec`, either set `{ "enabled": false }` in `.percy-playwright-dropin.json` or export
+`PERCY_DROPIN_DISABLE=true` (the env var also turns off `percy exec`'s baseline seeding). The
+override steps aside entirely — no snapshots are posted for `toHaveScreenshot()` assertions.
+
+Requires `@playwright/test` >= 1.49 (the override hooks Playwright's expect internals; on
+unsupported versions it degrades to a no-op **with a loud warning** — never silently).
+
 ## Percy on Automate
 
 ## Usage

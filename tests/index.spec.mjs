@@ -68,30 +68,37 @@ test.describe('percySnapshot', () => {
 
     utils.percy.config = savedConfig;
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot without config'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot without config'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('posts snapshots to the local percy server', async ({ page }) => {
-    await percySnapshot(page, 'Snapshot 1');
-    await percySnapshot(page, 'Snapshot 2');
-    await percySnapshot(page, 'Snapshot 3', { sync: true });
+    // The CLI testing server's log store is shared across parallel workers and wiped by every
+    // test's setupTest — a read-back can race a concurrent reset. Retry the post+read block as a
+    // unit (same guard as the drop-in dispatch tests).
+    await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1');
+      await percySnapshot(page, 'Snapshot 2');
+      await percySnapshot(page, 'Snapshot 3', { sync: true });
 
-    // Add delay to ensure logs are captured
-    // temp for alpha release
-    await new Promise(resolve => setTimeout(resolve, 100));
+      // Add delay to ensure logs are captured
+      // temp for alpha release
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      'Snapshot found: Snapshot 2',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/),
-      expect.stringMatching(/The Synchronous CLI functionality is not compatible with skipUploads option./)
-    ]));
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        'Snapshot found: Snapshot 2',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/),
+        expect.stringMatching(/The Synchronous CLI functionality is not compatible with skipUploads option./)
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('adds cookies to domSnapshot', async ({ page }) => {
@@ -158,10 +165,12 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot with iframe percy-element-id');
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot with iframe percy-element-id'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot with iframe percy-element-id'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('handles iframe processing without percy-element-id match', async ({ page }) => {
@@ -204,10 +213,12 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot with iframe no percy-element-id match');
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot with iframe no percy-element-id match'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot with iframe no percy-element-id match'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('handles iframe src attribute replacement', async ({ page }) => {
@@ -265,10 +276,12 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot with iframe src replacement');
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot with iframe src replacement'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot with iframe src replacement'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('handles invalid iframe URLs without throwing', async ({ page }) => {
@@ -354,52 +367,63 @@ test.describe('percySnapshot', () => {
 
   test('posts snapshots to percy server with responsiveSnapshotCapture true', async ({ page }) => {
     await helpers.test('config', { config: [1280], mobile: [] });
-    
+
     const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
-    
-    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [1280] });
-    
-    // Verify viewport was resized for responsive capture
-    expect(setViewportSizeSpy.called).toBe(true);
-    
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/)
-    ]));
+
+    // The shared testing server's log store is wiped by parallel workers' resets — retry the
+    // post+read block as a unit (same guard as 'posts snapshots to the local percy server').
+    await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true, widths: [1280] });
+
+      // Verify viewport was resized for responsive capture
+      expect(setViewportSizeSpy.called).toBe(true);
+
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/)
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('posts snapshots to percy server with responsiveSnapshotCapture false', async ({ page }) => {
-    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: false, widths: [1280] });
-    
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/)
-    ]));
+    // The shared testing server's log store is wiped by parallel workers' resets — retry the
+    // post+read block as a unit (same guard as 'posts snapshots to the local percy server').
+    await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: false, widths: [1280] });
+
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/)
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('posts snapshots to percy server with responsiveSnapshotCapture with mobile', async ({ page }) => {
     await helpers.test('config', { config: [1280], mobile: [390] });
     
     const setViewportSizeSpy = sinon.spy(page, 'setViewportSize');
-    
-    await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
-    
+
+    // Shared testing server: another worker's reset can wipe the log buffer between our post
+    // and the read — retry the act+assert together so a wiped buffer is repopulated.
+    await expect(async () => {
+      await percySnapshot(page, 'Snapshot 1', { responsiveSnapshotCapture: true });
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1',
+        `- url: ${helpers.testSnapshotURL}`,
+        expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
+        expect.stringMatching(/environmentInfo: playwright\/.+/)
+      ]));
+    }).toPass({ timeout: 20000 });
+
     // Verify viewport was resized for responsive capture with mobile widths
     expect(setViewportSizeSpy.called).toBe(true);
-    
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1',
-      `- url: ${helpers.testSnapshotURL}`,
-      expect.stringMatching(/clientInfo: @percy\/playwright\/.+/),
-      expect.stringMatching(/environmentInfo: playwright\/.+/)
-    ]));
   });
 
   test('multiDOM should not run when deferUploads is true', async ({ page }) => {
@@ -413,10 +437,12 @@ test.describe('percySnapshot', () => {
     // Verify that setViewportSize was NOT called (multi-DOM should be disabled)
     expect(setViewportSizeSpy.called).toBe(false);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Test Snapshot'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Test Snapshot'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive capture includes mobile widths when provided', async ({ page }) => {
@@ -432,10 +458,12 @@ test.describe('percySnapshot', () => {
     // Should be called for widths: 390, 768, and 1280
     expect(setViewportSizeSpy.callCount).toBeGreaterThanOrEqual(3);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Test Snapshot with mobile'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Test Snapshot with mobile'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive capture with mobile widths length 0', async ({ page }) => {
@@ -449,10 +477,12 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive capture when mobile key is not defined in config', async ({ page }) => {
@@ -466,10 +496,12 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot without mobile'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot without mobile'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('should reload page if PERCY_RESPONSIVE_CAPTURE_RELOAD_PAGE is set', async ({ page }) => {
@@ -552,10 +584,12 @@ test.describe('percySnapshot', () => {
     // Verify that setViewportSize was called (and failed)
     expect(setViewportSizeStub.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Test Snapshot'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Test Snapshot'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('should handle waitForFunction timeout during resize', async ({ page }) => {
@@ -565,10 +599,12 @@ test.describe('percySnapshot', () => {
     
     await percySnapshot(page, 'Test Snapshot', { responsiveSnapshotCapture: true });
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Test Snapshot'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Test Snapshot'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive snapshot with multiple widths', async ({ page }) => {
@@ -585,10 +621,12 @@ test.describe('percySnapshot', () => {
     expect(setViewportSizeSpy.called).toBe(true);
     expect(setViewportSizeSpy.callCount).toBeGreaterThan(1);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive_snapshot_capture option works', async ({ page }) => {
@@ -603,10 +641,12 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive capture with config option', async ({ page }) => {
@@ -619,10 +659,12 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized when responsive capture is enabled via config
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive capture handles null viewportSize', async ({ page }) => {
@@ -661,10 +703,12 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized for mobile widths
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('responsive capture with empty mobile and user widths', async ({ page }) => {
@@ -677,10 +721,12 @@ test.describe('percySnapshot', () => {
     // Verify viewport was resized using config widths
     expect(setViewportSizeSpy.called).toBe(true);
     
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot 1'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot 1'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('uses device-specific heights for mobile widths from deviceDetails', async ({ page }) => {
@@ -772,10 +818,12 @@ test.describe('percySnapshot', () => {
     // Verify no errors were logged (exposeClosedShadowRoots should not throw)
     expect(helpers.logger.stderr).toEqual([]);
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot non-Chromium'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot non-Chromium'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('exposeClosedShadowRoots: no closed shadow roots found detaches session and succeeds', async ({ page }) => {
@@ -806,10 +854,12 @@ test.describe('percySnapshot', () => {
     // Runtime.callFunctionOn should NOT have been called since no closed roots
     expect(mockCDPSession.send.calledWith('Runtime.callFunctionOn', sinon.match.any)).toBe(false);
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot no closed shadows'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot no closed shadows'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   // Note: These tests validate CDP method calls but not the actual feature contract
@@ -859,10 +909,12 @@ test.describe('percySnapshot', () => {
     // DOM.disable is no longer called — session detach handles cleanup
     expect(mockCDPSession.detach.called).toBe(true);
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot with closed shadows'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot with closed shadows'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('exposeClosedShadowRoots: catches CDP errors during processing and snapshot still succeeds', async ({ page }) => {
@@ -881,10 +933,12 @@ test.describe('percySnapshot', () => {
     expect(mockCDPSession.send.calledWith('DOM.enable')).toBe(true);
     expect(mockCDPSession.detach.called).toBe(true);
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot CDP error'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot CDP error'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   test('exposeClosedShadowRoots: cdpSession.detach is called in finally block even on success', async ({ page }) => {
@@ -919,10 +973,12 @@ test.describe('percySnapshot', () => {
 
     expect(mockCDPSession.detach.calledOnce).toBe(true);
 
-    const logs = await helpers.get('logs');
-    expect(logs).toEqual(expect.arrayContaining([
-      'Snapshot found: Snapshot detach on error'
-    ]));
+    await expect(async () => {
+      const logs = await helpers.get('logs');
+      expect(logs).toEqual(expect.arrayContaining([
+        'Snapshot found: Snapshot detach on error'
+      ]));
+    }).toPass({ timeout: 15000 });
   });
 
   // Skipped: sinon.spy(page, 'evaluate') on the playwright test fixture's
