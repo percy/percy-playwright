@@ -64,7 +64,7 @@
     "eslint-config-standard": "^16.0.2",
     "eslint-plugin-import": "^2.22.0",
     "eslint-plugin-node": "^11.1.0",
-    "eslint-plugin-promise": "^5.1.0",
+    "eslint-plugin-promise": "^7.3.0",
     "eslint-plugin-standard": "^5.0.0",
     "nyc": "^15.1.0",
     "playwright": "^1.60.0",
