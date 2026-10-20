@@ -20,5 +20,5 @@ jobs:
           path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
           key: v1/${{ runner.os }}/node-20/${{ hashFiles('**/yarn.lock') }}
           restore-keys: v1/${{ runner.os }}/node-20/
-      - run: yarn
+      - run: yarn install --frozen-lockfile
       - run: yarn test:types
