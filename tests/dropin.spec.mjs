@@ -27,8 +27,11 @@ import resolveConfig from '../dropin/baseline/resolve-config.js';
 import ConfigReporter from '../dropin/baseline/config-reporter.js';
 import reporterMod from '../dropin/reporter.js';
 import { createRequire } from 'module';
+import childProcess from 'child_process';
 
 const nodeRequire = createRequire(import.meta.url);
+// Required, not imported: provider.js requires it too, and a sibling ESM import would race it.
+const discover = nodeRequire('../dropin/baseline/discover.js');
 
 const { snapshotViaPercy, SCOPE_ATTR } = dropinDom;
 const { deriveName, _resetCounters } = identity;
@@ -487,5 +490,88 @@ test.describe('baseline provider (CLI seeding contract)', () => {
     // Only the fields identity reconstruction needs — nothing else leaks through (undefined
     // template/expect fields are dropped by JSON serialization).
     expect(Object.keys(shape.projects[0]).sort()).toEqual(['name', 'use']);
+  });
+});
+
+test.describe('drop-in WebP screenshot names', () => {
+  test.beforeEach(() => _resetCounters());
+
+  test('strips .webp like .png, including path arrays', () => {
+    const ti = { titlePath: ['f.spec.ts', 'case'] };
+    expect(deriveName('hero.webp', ti)).toBe('hero');
+    expect(deriveName('Hero-El.WEBP', ti)).toBe('Hero-El');
+    expect(deriveName(['nested', 'hero.webp'], ti)).toBe('nested-hero');
+    expect(deriveName('hero.jpeg', ti)).toBe('hero-jpeg');
+  });
+
+  test('keys the -N counter on the name with its extension, as Playwright does', () => {
+    const ti = { titlePath: ['f.spec.ts', 'case'] };
+    expect(deriveName('hero.png', ti)).toBe('hero');
+    expect(deriveName('hero.webp', ti)).toBe('hero');
+    expect(deriveName('hero.png', ti)).toBe('hero-1');
+    expect(deriveName('hero.webp', ti)).toBe('hero-1');
+    expect(deriveName('hero.webp', ti)).toBe('hero-2');
+  });
+});
+
+test.describe('drop-in WebP baseline discovery', () => {
+  let tmpDir, snapsDir;
+  const config = { projects: [{ name: 'chromium', use: { browserName: 'chromium', viewport: { width: 1280, height: 720 } } }] };
+
+  test.beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'percy-dropin-webp-'));
+    snapsDir = path.join(tmpDir, 'example.spec.ts-snapshots');
+    fs.mkdirSync(snapsDir, { recursive: true });
+    fs.writeFileSync(path.join(snapsDir, 'home-chromium-darwin.png'), 'png');
+  });
+
+  test.afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('lists .png and .webp baselines', () => {
+    fs.writeFileSync(path.join(snapsDir, 'hero-chromium-darwin.webp'), 'webp');
+    fs.writeFileSync(path.join(snapsDir, 'notes.txt'), 'x');
+    expect(discover.listBaselines(snapsDir).sort()).toEqual(['hero-chromium-darwin.webp', 'home-chromium-darwin.png']);
+  });
+
+  test('prefers the PNG when an identity is committed in both formats', () => {
+    fs.writeFileSync(path.join(snapsDir, 'home-chromium-darwin.webp'), 'webp');
+    const result = discover.discoverBaselines({ rootDir: tmpDir, config });
+
+    expect(result.degraded).toBeFalsy();
+    expect(result.baselines.map(b => path.basename(b.filepath))).toEqual(['home-chromium-darwin.png']);
+    expect(result.baselines[0].name).toBe('home');
+  });
+
+  test('degrades with webp_baseline when a baseline exists only as WebP', () => {
+    fs.writeFileSync(path.join(snapsDir, 'hero-chromium-darwin.webp'), 'webp');
+    const result = discover.discoverBaselines({ rootDir: tmpDir, config });
+
+    expect(result.degraded).toBe(true);
+    expect(result.reason).toBe(discover.DEGRADE.WEBP_BASELINE);
+    expect(result.baselines).toEqual([]);
+  });
+
+  test('ignores a stray WebP that maps to no project', () => {
+    fs.writeFileSync(path.join(snapsDir, 'random.webp'), 'webp');
+    const result = discover.discoverBaselines({ rootDir: tmpDir, config });
+
+    expect(result.degraded).toBeFalsy();
+    expect(result.baselines.map(b => b.name)).toEqual(['home']);
+  });
+});
+
+test.describe('drop-in from an ESM playwright config', () => {
+  test('imports alongside @playwright/test without a half-initialised module', () => {
+    const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const cli = nodeRequire.resolve('@playwright/test/cli');
+    const out = childProcess.spawnSync(process.execPath, [cli, 'test', '-c', 'tests/esm-config/playwright.config.mjs', '--list'], {
+      cwd: repo, encoding: 'utf8', env: { ...process.env, PERCY_SERVER_ADDRESS: 'http://localhost:1' }
+    });
+
+    expect(out.stderr + out.stdout).not.toContain('Cannot read properties of undefined');
+    expect(out.stdout).toContain('esm config loads the drop-in');
+    expect(out.status).toBe(0);
   });
 });

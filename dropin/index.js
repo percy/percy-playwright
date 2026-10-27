@@ -32,7 +32,11 @@
 //     native (latched once) so the suite behaves exactly as pre-install.
 //
 // The three modes are MUTUALLY EXCLUSIVE and resolved at config-load (config.js).
-const { expect: baseExpect, test } = require('@playwright/test');
+// createRequire, not the module's own `require`: when an ESM playwright.config imports this file,
+// Node loads it through the ESM CJS translator, whose `require('@playwright/test')` returns the
+// still-pending (empty) exports of the config's own sibling import. createRequire goes through the
+// regular CJS cache and gets the runner's live instance.
+const { expect: baseExpect, test } = require('module').createRequire(__filename)('@playwright/test');
 const utils = require('@percy/sdk-utils');
 const { captureFullOverride } = require('./capture');
 const { snapshotViaPercy } = require('./dom');

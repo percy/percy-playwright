@@ -68,7 +68,10 @@ function anonymousStem(titlePath, index) {
   return sanitizeForFilePath(trimLongString([...parts, index].join(' ')));
 }
 
-// Build the sanitized stem for a NAMED screenshot. Playwright sanitizes the name (sans `.png`) and,
+// Extensions toHaveScreenshot accepts (1.62+ adds `.webp`).
+const SCREENSHOT_EXT_RE = /\.(png|webp)$/i;
+
+// Build the sanitized stem for a NAMED screenshot. Playwright sanitizes the name (sans extension) and,
 // for the 2nd+ call with the SAME name in one test, appends `-{index-1}` (so `shot`, `shot-1`, …).
 // A path-array name (nested subdirs) is joined with `/` then sanitized per-segment by Playwright;
 // we join with `/` and sanitize the whole thing, which collapses `/` to `-` — see `degrade` note in
@@ -76,12 +79,15 @@ function anonymousStem(titlePath, index) {
 // array case is best-effort only).
 function namedStem(rawName, testInfo) {
   const joined = Array.isArray(rawName) ? rawName.join('/') : String(rawName);
-  const withoutExt = joined.replace(/\.png$/i, '');
-  const sanitized = sanitizeForFilePath(withoutExt);
+  const ext = (joined.match(SCREENSHOT_EXT_RE) || [''])[0];
+  const sanitized = sanitizeForFilePath(joined.slice(0, joined.length - ext.length));
 
+  // Playwright keys this counter by the output path WITH its extension, so `x.png` and `x.webp`
+  // in one test count separately (and both map to the same Percy name).
+  const key = sanitized + ext;
   const counters = countersFor(testInfo);
-  const index = (counters.named.get(sanitized) || 0) + 1;
-  counters.named.set(sanitized, index);
+  const index = (counters.named.get(key) || 0) + 1;
+  counters.named.set(key, index);
   return index > 1 ? `${sanitized}-${index - 1}` : sanitized;
 }
 
@@ -131,5 +137,6 @@ module.exports = {
   sanitizeForFilePath,
   trimLongString,
   anonymousStem,
+  SCREENSHOT_EXT_RE,
   _resetCounters
 };

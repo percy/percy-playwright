@@ -97,7 +97,8 @@ async function retryablePost(postFn, { retries = 3, backoff = 200, sleep = ms =>
 // ours was the only failure on the test.
 function scrubMissingBaselineSoftError() {
   try {
-    const testInfo = require('@playwright/test').test.info();
+    // Same instance the runner uses, even when an ESM config loaded this module (see index.js).
+    const testInfo = require('module').createRequire(__filename)('@playwright/test').test.info();
     const errors = testInfo && testInfo.errors;
     if (!Array.isArray(errors)) return;
     let removed = false;

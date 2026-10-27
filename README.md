@@ -56,9 +56,30 @@ $ percy exec -- node script.js
 
 `percySnapshot(page, name[, options])`
 
-- `page` (**required**) - A `playwright` page instance
-- `name` (**required**) - The snapshot name; must be unique to each snapshot
+- `page` (**required**) - A `playwright` page instance, or a `Locator`. A Locator snapshot is
+  scoped to its element (unless you pass `options.scope`); a Locator that matches nothing logs an
+  error and posts no snapshot.
+- `name` (**required**) - The snapshot name; must be unique to each snapshot. Optional for a
+  component mounted through `percyTest` (below).
 - `options` - [See per-snapshot configuration options](https://www.browserstack.com/docs/percy/take-percy-snapshots/overview#per-snapshot-configuration)
+
+### Component stories (`mount`, Playwright 1.62+)
+
+Wrap `test` with `percyTest` and snapshot the mounted component; unnamed snapshots are named after
+the story id (repeats in one test get `-2`, `-3`, …). Content rendered outside the story root, such
+as portals, is clipped by the scope — pass `scope` or snapshot the `page` for those.
+
+```js
+import { test as base } from '@playwright/test';
+import percySnapshot, { percyTest } from '@percy/playwright';
+
+const test = percyTest(base);
+
+test('button', async ({ mount }) => {
+  const button = await mount('components/Button/Primary');
+  await percySnapshot(button); // "components/Button/Primary", scoped to the story root
+});
+```
 
 
 ## toHaveScreenshot drop-in
@@ -73,9 +94,17 @@ require('@percy/playwright/dropin'); // registers the toHaveScreenshot override
 module.exports = defineConfig({ /* your config */ });
 ```
 
+From an ES module config (`playwright.config.mjs`), import the entry file:
+`import '@percy/playwright/dropin/index.js';`.
+
 ```bash
 PERCY_TOKEN=<web-project-token> npx percy exec -- npx playwright test
 ```
+
+`toHaveScreenshot('hero.webp')` and `toHaveScreenshot('hero.png')` map to the same Percy snapshot.
+Committed `.webp` baselines are not uploaded as the first build; when one has no `.png`
+counterpart, baseline seeding is skipped (`webp_baseline`) and the first Percy build sets the
+baseline instead.
 
 Just the standard `percy exec` — no wrapper, no extra flags. Capture dispatches automatically by
 your **project token**:

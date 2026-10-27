@@ -57,7 +57,7 @@ export const setupBaseline = command('setup-baseline', {
 
   if (degraded) {
     exit(1, `Could not map your committed Playwright baselines (${reason}). ` +
-      'Custom snapshot path templates and projects without an explicit browser/viewport ' +
+      'Custom snapshot path templates, WebP-only baselines and projects without an explicit browser/viewport ' +
       'cannot be mapped automatically.');
   }
   if (!baselines.length) {

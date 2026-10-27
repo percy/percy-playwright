@@ -17,7 +17,7 @@
 // rather than seed a mismatched identity that would surface as a phantom "new" snapshot.
 const fs = require('fs');
 const path = require('path');
-const { sanitizeForFilePath } = require('../identity');
+const { sanitizeForFilePath, SCREENSHOT_EXT_RE } = require('../identity');
 const { sanitizePath, sanitizeDirentName } = require('../paths');
 
 // Node's process.platform values Playwright bakes into the `{snapshotSuffix}` segment.
@@ -29,7 +29,9 @@ const DEGRADE = Object.freeze({
   PROJECT_MISSING_FIELDS: 'project_missing_browser_or_viewport',
   AMBIGUOUS_TAIL: 'ambiguous_project_platform_tail',
   PATH_ARG: 'path_array_arg',
-  NO_PROJECTS: 'no_resolvable_projects'
+  NO_PROJECTS: 'no_resolvable_projects',
+  // The comparison ingest takes PNG tiles; a WebP-only baseline can't be seeded faithfully.
+  WEBP_BASELINE: 'webp_baseline'
 });
 
 // A custom snapshot path template means the default `{arg}{-projectName}{-snapshotSuffix}` layout no
@@ -88,9 +90,9 @@ function collectSnapshotDirs(rootDir) {
   return out;
 }
 
-// Recursively collect every `.png` under `dir`, returning the path relative to `dir` (so nested
-// `{arg}` subdir names are preserved for the path-array degrade check).
-function listPngs(dir) {
+// Recursively collect every `.png`/`.webp` under `dir`, returning the path relative to `dir` (so
+// nested `{arg}` subdir names are preserved for the path-array degrade check).
+function listBaselines(dir) {
   const out = [];
   const walk = current => {
     for (const entry of safeReaddir(current, { withFileTypes: true })) {
@@ -98,7 +100,7 @@ function listPngs(dir) {
       if (name === null) continue;
       const full = path.join(sanitizePath(current), name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && /\.png$/i.test(name)) out.push(path.relative(dir, full));
+      else if (entry.isFile() && SCREENSHOT_EXT_RE.test(name)) out.push(path.relative(dir, full));
     }
   };
   walk(dir);
@@ -208,8 +210,13 @@ function discoverBaselines({ rootDir = process.cwd(), snapshotDir = null, baseBr
 
   const baselines = [];
   for (const dir of dirs) {
-    for (const rel of listPngs(dir)) {
-      const stem = rel.replace(/\.png$/i, '');
+    const files = listBaselines(dir);
+    const pngStems = new Set(files.filter(f => /\.png$/i.test(f)).map(f => f.replace(SCREENSHOT_EXT_RE, '')));
+    for (const rel of files) {
+      const stem = rel.replace(SCREENSHOT_EXT_RE, '');
+      const isWebp = !/\.png$/i.test(rel);
+      // The same identity committed in both formats: the PNG is the one that can be seeded.
+      if (isWebp && pngStems.has(stem)) continue;
       const result = reconstructName(stem, projects, PLATFORM_SUFFIXES);
 
       if (result.degrade) {
@@ -220,6 +227,7 @@ function discoverBaselines({ rootDir = process.cwd(), snapshotDir = null, baseBr
         // (do NOT seed an identity we can't trust), but don't fail the whole discovery.
         continue;
       }
+      if (isWebp) return degraded(DEGRADE.WEBP_BASELINE, { baseBranch });
 
       baselines.push({
         filepath: path.join(dir, rel),
@@ -249,6 +257,7 @@ module.exports = {
   discoverBaselines,
   findSnapshotDirs,
   reconstructName,
+  listBaselines,
   projectIdentity,
   hasCustomTemplate,
   PLATFORM_SUFFIXES,
