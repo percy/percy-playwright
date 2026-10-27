@@ -7,6 +7,17 @@ export default function percySnapshot(
   options?: SnapshotOptions
 ): Promise<void>;
 
+// A Locator snapshot is scoped to its element. The name may be omitted for a component mounted
+// through percyTest()'s `mount`, in which case the story id is used.
+export default function percySnapshot(
+  locator: Playwright.Locator,
+  name?: string,
+  options?: SnapshotOptions
+): Promise<void>;
+
+// Wraps the stories-model `mount` fixture (@playwright/test 1.62+) to record story ids.
+export function percyTest<T extends { extend: (...args: any[]) => any }>(test: T): T;
+
 export default function percyScreenshot(
   page: Playwright.Page,
   name: string,

@@ -21,6 +21,22 @@ class Utils {
     }
     return sessionDetails;
   }
+
+  // A Locator exposes `.page()` but no `.url()`; a Page has both.
+  static isLocator(subject) {
+    return !!subject && typeof subject.page === 'function' && typeof subject.url !== 'function';
+  }
+
+  // Marks the locator's element with `attr` so a server-side render can be scoped to `[attr]`. An
+  // attribute survives DOM serialization, unlike a CSS selector reconstructed from the live element.
+  static async withScopedLocator(locator, attr, fn) {
+    await locator.evaluate(/* istanbul ignore next */ (el, a) => el.setAttribute(a, ''), attr);
+    try {
+      return await fn(`[${attr}]`);
+    } finally {
+      await locator.evaluate(/* istanbul ignore next */ (el, a) => el.removeAttribute(a), attr).catch(() => {});
+    }
+  }
 }
 
 module.exports = {

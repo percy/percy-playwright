@@ -462,39 +462,104 @@ async function captureDOM(page, options, percyDOM) {
   }
 }
 
-// Take a DOM snapshot and post it to the snapshot endpoint
+const SCOPE_ATTR = 'data-percy-scope';
+
+// Locators returned by percyTest()'s `mount` → { storyId, counts }. `counts` is shared by every
+// mount in one test, so repeated unnamed snapshots of a story get `-2`, `-3`, … per test.
+const STORY_IDS = new WeakMap();
+
+function storySnapshotName(locator) {
+  const story = STORY_IDS.get(locator);
+  if (!story) return undefined;
+  const index = (story.counts.get(story.storyId) || 0) + 1;
+  story.counts.set(story.storyId, index);
+  return index > 1 ? `${story.storyId}-${index}` : story.storyId;
+}
+
+async function postDOMSnapshot(page, name, options) {
+  // Inject the DOM serialization script
+  const percyDOM = await utils.fetchPercyDOM();
+  await page.evaluate(percyDOM);
+
+  // Merge .percy.yml config options with snapshot options (snapshot options take priority)
+  const mergedOptions = utils.mergeSnapshotOptions(options);
+  // Expose closed shadow roots via CDP before serialization so
+  // PercyDOM.serialize() can access them through the WeakMap
+  await exposeClosedShadowRoots(page);
+
+  let domSnapshot = await captureDOM(page, mergedOptions, percyDOM);
+
+  // Post the DOM to the snapshot endpoint with snapshot options and other info
+  const response = await utils.postSnapshot({
+    ...options,
+    environmentInfo: ENV_INFO,
+    clientInfo: CLIENT_INFO,
+    url: page.url(),
+    domSnapshot,
+    name
+  });
+  return response?.body?.data;
+}
+
+async function postLocatorSnapshot(locator, name, options) {
+  // An empty locator would post a blank scoped snapshot and silently create an empty baseline.
+  if (await locator.count() === 0) {
+    log.error(`Could not take DOM snapshot "${name}": the locator matched no elements`);
+    return;
+  }
+  const page = locator.page();
+  if (options?.scope) return await postDOMSnapshot(page, name, options);
+  return await Utils.withScopedLocator(locator, SCOPE_ATTR, scope =>
+    postDOMSnapshot(page, name, { ...options, scope }));
+}
+
+// Take a DOM snapshot and post it to the snapshot endpoint. Accepts a Page, or a Locator whose
+// element the snapshot is scoped to.
 const percySnapshot = async function(page, name, options) {
   if (!page) throw new Error('A Playwright `page` object is required.');
+  const isLocator = Utils.isLocator(page);
+  if (!name && isLocator) name = storySnapshotName(page);
   if (!name) throw new Error('The `name` argument is required.');
   if (!(await utils.isPercyEnabled())) return;
 
   try {
-    // Inject the DOM serialization script
-    const percyDOM = await utils.fetchPercyDOM();
-    await page.evaluate(percyDOM);
-
-    // Merge .percy.yml config options with snapshot options (snapshot options take priority)
-    const mergedOptions = utils.mergeSnapshotOptions(options);
-    // Expose closed shadow roots via CDP before serialization so
-    // PercyDOM.serialize() can access them through the WeakMap
-    await exposeClosedShadowRoots(page);
-
-    let domSnapshot = await captureDOM(page, mergedOptions, percyDOM);
-
-    // Post the DOM to the snapshot endpoint with snapshot options and other info
-    const response = await utils.postSnapshot({
-      ...options,
-      environmentInfo: ENV_INFO,
-      clientInfo: CLIENT_INFO,
-      url: page.url(),
-      domSnapshot,
-      name
-    });
-    return response?.body?.data;
+    if (isLocator) return await postLocatorSnapshot(page, name, options);
+    return await postDOMSnapshot(page, name, options);
   } catch (err) {
     log.error(`Could not take DOM snapshot "${name}"`);
     log.error(err);
   }
+};
+
+// Playwright keeps fixtures on an internal test-type object; an unknown shape is not treated as
+// "no mount" so a future internal rename can't break percyTest().
+function hasMountFixture(test) {
+  const sym = Object.getOwnPropertySymbols(test).find(s => s.description === 'testType');
+  const fixtures = sym && test[sym]?.fixtures;
+  if (!Array.isArray(fixtures)) return true;
+  return fixtures.some(f => f?.fixtures && Object.prototype.hasOwnProperty.call(f.fixtures, 'mount'));
+}
+
+// Wraps the stories-model `mount` fixture (Playwright 1.62+) so `percySnapshot(component)` can
+// name the snapshot after the mounted story id.
+const percyTest = function(test) {
+  if (!test || typeof test.extend !== 'function') {
+    throw new Error('percyTest() expects the `test` object from @playwright/test.');
+  }
+  if (!hasMountFixture(test)) {
+    throw new Error('percyTest() requires the built-in `mount` fixture from @playwright/test 1.62 or newer. ' +
+      'Upgrade Playwright, or pass a snapshot name to percySnapshot() instead.');
+  }
+  return test.extend({
+    mount: async ({ mount }, use) => {
+      const counts = new Map();
+      await use(async (storyId, ...args) => {
+        const component = await mount(storyId, ...args);
+        if (typeof storyId === 'string') STORY_IDS.set(component, { storyId, counts });
+        return component;
+      });
+    }
+  });
 };
 
 const createRegion = function({
@@ -585,6 +650,7 @@ module.exports = percySnapshot;
 module.exports.percySnapshot = percySnapshot;
 module.exports.createRegion = createRegion;
 module.exports.percyScreenshot = percyScreenshot;
+module.exports.percyTest = percyTest;
 module.exports.CLIENT_INFO = CLIENT_INFO;
 module.exports.ENV_INFO = ENV_INFO;
 // Exported for direct unit testing of the parentFrame-chain walkers.

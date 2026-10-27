@@ -23,6 +23,8 @@
 // server-controlled here.
 const utils = require('@percy/sdk-utils');
 
+const { Utils } = require('../utils');
+
 const log = utils.logger('playwright-dropin');
 
 // Lazy-required at capture time: the root module may itself be mid-load when the drop-in entry is
@@ -39,10 +41,8 @@ const SCREENSHOT_ONLY_OPTS = Object.freeze([
   'clip', 'fullPage', 'mask', 'maskColor', 'omitBackground', 'scale', 'animations', 'caret', 'style', 'stylePath'
 ]);
 
-// A Locator exposes `.page()`; a Page does not.
 function resolvePageAndLocator(pageOrLocator) {
-  const isLocator = pageOrLocator && typeof pageOrLocator.page === 'function';
-  return isLocator
+  return Utils.isLocator(pageOrLocator)
     ? { page: pageOrLocator.page(), locator: pageOrLocator }
     : { page: pageOrLocator, locator: null };
 }
@@ -62,31 +62,21 @@ async function snapshotViaPercy(pageOrLocator, name, { width, sync } = {}, optio
     log.debug(`Percy: snapshot flow ignores screenshot-only option(s): ${ignored.join(', ')}`);
   }
 
-  // Locator subject → mark the element so the server-side render can be scoped to it. The marker
-  // attribute survives serialization (no fragile CSS-selector reconstruction) and is removed right
-  // after capture so the live page is left untouched.
-  let scope = null;
-  if (locator) {
-    // istanbul ignore next - browser-executed function (instrumentation counters don't exist there)
-    await locator.evaluate((el, attr) => el.setAttribute(attr, ''), SCOPE_ATTR);
-    scope = `[${SCOPE_ATTR}]`;
-  }
-
   const viewport = (page && typeof page.viewportSize === 'function' && page.viewportSize()) || null;
-  const snapshotOptions = {};
-  if (width) snapshotOptions.widths = [width];
-  if (viewport && viewport.height) snapshotOptions.minHeight = viewport.height;
-  if (scope) snapshotOptions.scope = scope;
-  if (sync) snapshotOptions.sync = true;
+  const snapshotOptions = scope => {
+    const opts = {};
+    if (width) opts.widths = [width];
+    if (viewport && viewport.height) opts.minHeight = viewport.height;
+    if (scope) opts.scope = scope;
+    if (sync) opts.sync = true;
+    return opts;
+  };
 
-  try {
-    return await percySnapshot(page, name, snapshotOptions);
-  } finally {
-    if (locator) {
-      // istanbul ignore next - browser-executed function (instrumentation counters don't exist there)
-      await locator.evaluate((el, attr) => el.removeAttribute(attr), SCOPE_ATTR).catch(() => {});
-    }
-  }
+  // Locator subject → the element is marked (shared helper in utils.js) and the snapshot scoped to
+  // it; the marker is removed right after capture so the live page is left untouched.
+  if (!locator) return await percySnapshot(page, name, snapshotOptions(null));
+  return await Utils.withScopedLocator(locator, SCOPE_ATTR, scope =>
+    percySnapshot(page, name, snapshotOptions(scope)));
 }
 
 module.exports = { snapshotViaPercy, resolvePageAndLocator, SCOPE_ATTR, SCREENSHOT_ONLY_OPTS };
