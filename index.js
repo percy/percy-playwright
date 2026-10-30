@@ -353,8 +353,47 @@ async function captureSerializedDOM(page, options, percyDOM) {
   if (processedFrames.length > 0) {
     domSnapshot.corsIframes = processedFrames;
   }
-  domSnapshot.cookies = await page.context().cookies();
+  domSnapshot.cookies = await captureCookies(page);
   return domSnapshot;
+}
+
+// The CLI replays forwarded cookies in its discovery browser so assets behind
+// a session (including HttpOnly session cookies) still load. It only reads
+// these fields, so forward nothing else, and only for cookies belonging to the
+// snapshotted page's site so unrelated sessions in the same browser context
+// (e.g. an SSO provider) are never sent.
+const FORWARDED_COOKIE_FIELDS = ['name', 'value', 'domain', 'secure'];
+const IP_HOST = /^[\d.]+$|:/;
+
+function cookieSite(host) {
+  host = String(host || '').replace(/^\.|^\[|\]$/g, '').toLowerCase();
+  if (IP_HOST.test(host)) return host;
+  return host.split('.').slice(-2).join('.');
+}
+
+function filterPageCookies(cookies, pageUrl) {
+  let pageHost;
+  try {
+    pageHost = new URL(pageUrl).hostname;
+  } catch {
+    return [];
+  }
+  if (!pageHost) return [];
+
+  const site = cookieSite(pageHost);
+  return (cookies || [])
+    .filter(cookie => cookie && cookieSite(cookie.domain) === site)
+    .map(cookie => {
+      const picked = {};
+      for (const field of FORWARDED_COOKIE_FIELDS) {
+        if (cookie[field] !== undefined) picked[field] = cookie[field];
+      }
+      return picked;
+    });
+}
+
+async function captureCookies(page) {
+  return filterPageCookies(await page.context().cookies(), page.url());
 }
 
 async function changeViewportAndWait(page, width, height, resizeCount) {
@@ -597,3 +636,4 @@ module.exports.captureDOM = captureDOM;
 module.exports.resolveIgnoreSelectors = resolveIgnoreSelectors;
 module.exports.isUnsupportedIframeSrc = isUnsupportedIframeSrc;
 module.exports.resolveMaxFrameDepth = resolveMaxFrameDepth;
+module.exports.filterPageCookies = filterPageCookies;
