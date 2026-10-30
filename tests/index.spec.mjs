@@ -101,8 +101,11 @@ test.describe('percySnapshot', () => {
     }).toPass({ timeout: 15000 });
   });
 
-  test('adds cookies to domSnapshot', async ({ page }) => {
-    const mockCookies = [{ name: 'test_cookie', value: 'test_value', domain: 'example.com' }];
+  test('adds the page\'s cookies to domSnapshot, including HttpOnly ones', async ({ page }) => {
+    const mockCookies = [
+      { name: 'session', value: 's3cr3t', domain: 'localhost', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax', partitionKey: 'pk' },
+      { name: 'idp_session', value: 'other', domain: '.sso.example.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' }
+    ];
     sinon.stub(page.context(), 'cookies').resolves(mockCookies);
 
     const domSnapshot = { html: '<html></html>' };
@@ -110,7 +113,57 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot with Cookies');
 
-    expect(domSnapshot.cookies).toEqual(mockCookies);
+    expect(domSnapshot.cookies).toEqual([
+      { name: 'session', value: 's3cr3t', domain: 'localhost', secure: false }
+    ]);
+  });
+
+  test.describe('filterPageCookies', () => {
+    const { filterPageCookies } = percySnapshot;
+
+    test('keeps cookies for the page\'s site and its subdomains', () => {
+      const cookies = [
+        { name: 'a', value: '1', domain: 'app.example.com' },
+        { name: 'b', value: '2', domain: '.example.com' },
+        { name: 'c', value: '3', domain: 'cdn.example.com' },
+        { name: 'd', value: '4', domain: 'login.idp.test' },
+        { name: 'e', value: '5', domain: 'example.com.evil.test' }
+      ];
+
+      expect(filterPageCookies(cookies, 'https://app.example.com/dashboard').map(c => c.name))
+        .toEqual(['a', 'b', 'c']);
+    });
+
+    test('forwards only the fields the CLI consumes', () => {
+      const cookies = [{
+        name: 'sid', value: 'v', domain: 'example.com', path: '/', expires: 10, httpOnly: true, secure: true,
+        sameSite: 'Strict', partitionKey: 'pk', sourcePort: 443, size: 4
+      }];
+
+      expect(filterPageCookies(cookies, 'https://example.com/')).toEqual([{
+        name: 'sid', value: 'v', domain: 'example.com', secure: true
+      }]);
+    });
+
+    test('matches IP hosts exactly', () => {
+      const cookies = [
+        { name: 'v4', value: '1', domain: '127.0.0.1' },
+        { name: 'v4other', value: '2', domain: '10.0.0.1' },
+        { name: 'v6', value: '3', domain: '::1' }
+      ];
+
+      expect(filterPageCookies(cookies, 'http://127.0.0.1:8080/').map(c => c.name)).toEqual(['v4']);
+      expect(filterPageCookies(cookies, 'http://[::1]:8080/').map(c => c.name)).toEqual(['v6']);
+    });
+
+    test('returns no cookies when the page has no host', () => {
+      const cookies = [{ name: 'a', value: '1', domain: 'example.com' }];
+
+      expect(filterPageCookies(cookies, 'about:blank')).toEqual([]);
+      expect(filterPageCookies(cookies, 'not a url')).toEqual([]);
+      expect(filterPageCookies(undefined, 'https://example.com/')).toEqual([]);
+      expect(filterPageCookies([null, { name: 'b', value: '2' }], 'https://example.com/')).toEqual([]);
+    });
   });
 
   test('handles snapshot failures', async ({ page }) => {
