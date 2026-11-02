@@ -359,30 +359,35 @@ async function captureSerializedDOM(page, options, percyDOM) {
 
 // The CLI replays forwarded cookies in its discovery browser so assets behind
 // a session (including HttpOnly session cookies) still load. It only reads
-// these fields, so forward nothing else, and only for cookies belonging to the
-// snapshotted page's site so unrelated sessions in the same browser context
-// (e.g. an SSO provider) are never sent.
+// these fields, so forward nothing else, and only for cookies whose domain
+// matches the snapshotted page's host (the page host itself or a parent
+// domain, per RFC 6265 domain-matching) so unrelated sessions in the same
+// browser context (e.g. an SSO provider) are never sent.
 const FORWARDED_COOKIE_FIELDS = ['name', 'value', 'domain', 'secure'];
 const IP_HOST = /^[\d.]+$|:/;
 
-function cookieSite(host) {
-  host = String(host || '').replace(/^\.|^\[|\]$/g, '').toLowerCase();
-  if (IP_HOST.test(host)) return host;
-  return host.split('.').slice(-2).join('.');
+function normalizeHost(host) {
+  return String(host || '').replace(/^\.|^\[|\]$/g, '').toLowerCase();
+}
+
+function cookieDomainMatches(pageHost, cookie) {
+  const domain = normalizeHost(cookie.domain);
+  if (!domain) return false;
+  if (domain === pageHost) return true;
+  return !IP_HOST.test(pageHost) && pageHost.endsWith(`.${domain}`);
 }
 
 function filterPageCookies(cookies, pageUrl) {
   let pageHost;
   try {
-    pageHost = new URL(pageUrl).hostname;
+    pageHost = normalizeHost(new URL(pageUrl).hostname);
   } catch {
     return [];
   }
   if (!pageHost) return [];
 
-  const site = cookieSite(pageHost);
   return (cookies || [])
-    .filter(cookie => cookie && cookieSite(cookie.domain) === site)
+    .filter(cookie => cookie && cookieDomainMatches(pageHost, cookie))
     .map(cookie => {
       const picked = {};
       for (const field of FORWARDED_COOKIE_FIELDS) {

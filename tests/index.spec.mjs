@@ -121,17 +121,32 @@ test.describe('percySnapshot', () => {
   test.describe('filterPageCookies', () => {
     const { filterPageCookies } = percySnapshot;
 
-    test('keeps cookies for the page\'s site and its subdomains', () => {
+    test('keeps cookies for the page\'s host and its parent domains only', () => {
       const cookies = [
         { name: 'a', value: '1', domain: 'app.example.com' },
         { name: 'b', value: '2', domain: '.example.com' },
         { name: 'c', value: '3', domain: 'cdn.example.com' },
         { name: 'd', value: '4', domain: 'login.idp.test' },
-        { name: 'e', value: '5', domain: 'example.com.evil.test' }
+        { name: 'e', value: '5', domain: 'example.com.evil.test' },
+        { name: 'f', value: '6', domain: '.APP.Example.com' },
+        { name: 'g', value: '7', domain: 'deep.app.example.com' }
       ];
 
       expect(filterPageCookies(cookies, 'https://app.example.com/dashboard').map(c => c.name))
-        .toEqual(['a', 'b', 'c']);
+        .toEqual(['a', 'b', 'f']);
+    });
+
+    test('does not treat a shared public suffix as the same site', () => {
+      const cookies = [
+        { name: 'shop', value: '1', domain: 'shop.example.co.uk' },
+        { name: 'parent', value: '2', domain: '.example.co.uk' },
+        { name: 'bank', value: '3', domain: 'bank.co.uk' },
+        { name: 'bankWide', value: '4', domain: '.bank.co.uk' },
+        { name: 'sibling', value: '5', domain: 'blog.example.co.uk' }
+      ];
+
+      expect(filterPageCookies(cookies, 'https://shop.example.co.uk/cart').map(c => c.name))
+        .toEqual(['shop', 'parent']);
     });
 
     test('forwards only the fields the CLI consumes', () => {
