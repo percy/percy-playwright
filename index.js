@@ -358,47 +358,44 @@ async function captureSerializedDOM(page, options, percyDOM) {
 }
 
 // The CLI replays forwarded cookies in its discovery browser so assets behind
-// a session (including HttpOnly session cookies) still load. It only reads
-// these fields, so forward nothing else, and only for cookies whose domain
-// matches the snapshotted page's host (the page host itself or a parent
-// domain, per RFC 6265 domain-matching) so unrelated sessions in the same
-// browser context (e.g. an SSO provider) are never sent.
+// a session (including HttpOnly session cookies, and cookies for other hosts
+// such as an API or CDN domain) still load. It only reads these fields, so
+// forward nothing else. Customers can opt out of forwarding entirely with the
+// CLI's PERCY_DO_NOT_USE_CAPTURED_COOKIES setting.
 const FORWARDED_COOKIE_FIELDS = ['name', 'value', 'domain', 'secure'];
-const IP_HOST = /^[\d.]+$|:/;
+let cookieOptOutWarned = false;
 
-function normalizeHost(host) {
-  return String(host || '').replace(/^\.|^\[|\]$/g, '').toLowerCase();
+function cookieForwardingDisabled() {
+  return process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES?.toLowerCase() === 'true';
 }
 
-function cookieDomainMatches(pageHost, cookie) {
-  const domain = normalizeHost(cookie.domain);
-  if (!domain) return false;
-  if (domain === pageHost) return true;
-  return !IP_HOST.test(pageHost) && pageHost.endsWith(`.${domain}`);
-}
-
-function filterPageCookies(cookies, pageUrl) {
-  let pageHost;
-  try {
-    pageHost = normalizeHost(new URL(pageUrl).hostname);
-  } catch {
-    return [];
-  }
-  if (!pageHost) return [];
-
-  return (cookies || [])
-    .filter(cookie => cookie && cookieDomainMatches(pageHost, cookie))
-    .map(cookie => {
-      const picked = {};
-      for (const field of FORWARDED_COOKIE_FIELDS) {
-        if (cookie[field] !== undefined) picked[field] = cookie[field];
-      }
-      return picked;
-    });
+function minimiseCookies(cookies) {
+  return (cookies || []).filter(Boolean).map(cookie => {
+    const picked = {};
+    for (const field of FORWARDED_COOKIE_FIELDS) {
+      if (cookie[field] !== undefined) picked[field] = cookie[field];
+    }
+    return picked;
+  });
 }
 
 async function captureCookies(page) {
-  return filterPageCookies(await page.context().cookies(), page.url());
+  if (cookieForwardingDisabled()) {
+    if (!cookieOptOutWarned) {
+      cookieOptOutWarned = true;
+      log.warn('Not sending browser cookies to Percy because PERCY_DO_NOT_USE_CAPTURED_COOKIES is set. ' +
+        'Pages or assets that need a logged-in session may fail to load during asset discovery, ' +
+        'so snapshots can render incorrectly.');
+    }
+    return [];
+  }
+
+  try {
+    return minimiseCookies(await page.context().cookies());
+  } catch (err) {
+    log.debug(`Could not read browser cookies: ${err.message}`);
+    return [];
+  }
 }
 
 async function changeViewportAndWait(page, width, height, resizeCount) {
@@ -641,4 +638,5 @@ module.exports.captureDOM = captureDOM;
 module.exports.resolveIgnoreSelectors = resolveIgnoreSelectors;
 module.exports.isUnsupportedIframeSrc = isUnsupportedIframeSrc;
 module.exports.resolveMaxFrameDepth = resolveMaxFrameDepth;
-module.exports.filterPageCookies = filterPageCookies;
+module.exports.minimiseCookies = minimiseCookies;
+module.exports.resetCookieOptOutWarning = () => { cookieOptOutWarned = false; };
