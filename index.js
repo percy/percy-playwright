@@ -353,7 +353,14 @@ async function captureSerializedDOM(page, options, percyDOM) {
   if (processedFrames.length > 0) {
     domSnapshot.corsIframes = processedFrames;
   }
+  // The serializer also records each document's cookie string; replace the
+  // page's with the context cookies, and drop the frames' when opted out.
   domSnapshot.cookies = await captureCookies(page);
+  if (cookieForwardingDisabled()) {
+    for (const frame of processedFrames) {
+      if (frame.iframeSnapshot) delete frame.iframeSnapshot.cookies;
+    }
+  }
   return domSnapshot;
 }
 
