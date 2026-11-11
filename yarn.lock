@@ -2728,7 +2728,12 @@ playwright-core@1.61.1:
   resolved "https://registry.yarnpkg.com/playwright-core/-/playwright-core-1.61.1.tgz#3c99841307efbbabc9d724c41a88c914705d15fc"
   integrity sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==
 
-playwright@1.61.1, playwright@^1.60.0:
+playwright-core@1.65.0:
+  version "1.65.0"
+  resolved "https://registry.yarnpkg.com/playwright-core/-/playwright-core-1.65.0.tgz#2b4671949db79c6ea47facf09f4aeffb90bc5c7f"
+  integrity sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA==
+
+playwright@1.61.1:
   version "1.61.1"
   resolved "https://registry.yarnpkg.com/playwright/-/playwright-1.61.1.tgz#d8c0c06eb93c28981afc747bace453bdbd5018bc"
   integrity sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==
@@ -2736,6 +2741,13 @@ playwright@1.61.1, playwright@^1.60.0:
     playwright-core "1.61.1"
   optionalDependencies:
     fsevents "2.3.2"
+
+playwright@^1.60.0:
+  version "1.65.0"
+  resolved "https://registry.yarnpkg.com/playwright/-/playwright-1.65.0.tgz#d890f700bf7a04b42cbdc4baab8d0e16b1d73f41"
+  integrity sha512-F3AMWcR44qMBt4kq+6Kb6mX7bjGXshktKFOPULd7reED6ZJWevjbNRqysP7q+AATE9kdPEZBibex1BYsvpVoeA==
+  dependencies:
+    playwright-core "1.65.0"
 
 plur@^4.0.0:
   version "4.0.0"
