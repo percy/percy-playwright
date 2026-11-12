@@ -101,8 +101,12 @@ test.describe('percySnapshot', () => {
     }).toPass({ timeout: 15000 });
   });
 
-  test('adds cookies to domSnapshot', async ({ page }) => {
-    const mockCookies = [{ name: 'test_cookie', value: 'test_value', domain: 'example.com' }];
+  test('forwards every browser cookie to domSnapshot, including other hosts and HttpOnly ones', async ({ page }) => {
+    const mockCookies = [
+      { name: 'session_id', value: 's3cr3t', domain: 'localhost', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax', partitionKey: 'pk' },
+      { name: 'auth_token', value: 'tok', domain: '.api.example.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' },
+      { name: 'cdn_auth', value: 'c', domain: 'cdn.example.net', path: '/', httpOnly: false, secure: true, sameSite: 'None' }
+    ];
     sinon.stub(page.context(), 'cookies').resolves(mockCookies);
 
     const domSnapshot = { html: '<html></html>' };
@@ -110,7 +114,86 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot with Cookies');
 
-    expect(domSnapshot.cookies).toEqual(mockCookies);
+    expect(domSnapshot.cookies).toEqual([
+      { name: 'session_id', value: 's3cr3t', domain: 'localhost', secure: false },
+      { name: 'auth_token', value: 'tok', domain: '.api.example.com', secure: true },
+      { name: 'cdn_auth', value: 'c', domain: 'cdn.example.net', secure: true }
+    ]);
+  });
+
+  test('still takes the snapshot without cookies when they cannot be read', async ({ page }) => {
+    sinon.stub(page.context(), 'cookies').rejects(new Error('context closed'));
+
+    const domSnapshot = { html: '<html></html>' };
+    sinon.stub(page, 'evaluate').resolves(domSnapshot);
+
+    await percySnapshot(page, 'Snapshot with unreadable cookies');
+
+    expect(domSnapshot.cookies).toEqual([]);
+    expect(helpers.logger.stderr.some(line => line.includes('context closed'))).toBe(false);
+  });
+
+  test.describe('PERCY_DO_NOT_USE_CAPTURED_COOKIES', () => {
+    const warning = '[percy] Not sending browser cookies to Percy because PERCY_DO_NOT_USE_CAPTURED_COOKIES is set. ' +
+      'Pages or assets that need a logged-in session may fail to load during asset discovery, ' +
+      'so snapshots can render incorrectly.';
+
+    test.beforeEach(() => {
+      percySnapshot.resetCookieOptOutWarning();
+    });
+
+    test.afterEach(() => {
+      delete process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES;
+      percySnapshot.resetCookieOptOutWarning();
+    });
+
+    test('sends no cookies and warns once when set', async ({ page }) => {
+      process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES = 'true';
+      const cookies = sinon.stub(page.context(), 'cookies').resolves([{ name: 'session_id', value: 's', domain: 'localhost' }]);
+
+      const domSnapshot = { html: '<html></html>' };
+      sinon.stub(page, 'evaluate').resolves(domSnapshot);
+
+      await percySnapshot(page, 'Opt-out 1');
+      await percySnapshot(page, 'Opt-out 2');
+
+      expect(domSnapshot.cookies).toEqual([]);
+      expect(cookies.called).toBe(false);
+      expect(helpers.logger.stderr.filter(line => line === warning)).toHaveLength(1);
+    });
+
+    test('forwards cookies when set to anything other than true', async ({ page }) => {
+      process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES = 'false';
+      sinon.stub(page.context(), 'cookies').resolves([{ name: 'session_id', value: 's', domain: 'localhost' }]);
+
+      const domSnapshot = { html: '<html></html>' };
+      sinon.stub(page, 'evaluate').resolves(domSnapshot);
+
+      await percySnapshot(page, 'Opt-out off');
+
+      expect(domSnapshot.cookies).toEqual([{ name: 'session_id', value: 's', domain: 'localhost' }]);
+      expect(helpers.logger.stderr).not.toEqual(expect.arrayContaining([warning]));
+    });
+  });
+
+  test.describe('minimiseCookies', () => {
+    const { minimiseCookies } = percySnapshot;
+
+    test('forwards only the fields the CLI consumes', () => {
+      const cookies = [{
+        name: 'sid', value: 'v', domain: 'example.com', path: '/', expires: 10, httpOnly: true, secure: true,
+        sameSite: 'Strict', partitionKey: 'pk', sourcePort: 443, size: 4
+      }];
+
+      expect(minimiseCookies(cookies)).toEqual([{
+        name: 'sid', value: 'v', domain: 'example.com', secure: true
+      }]);
+    });
+
+    test('tolerates missing cookie lists and entries', () => {
+      expect(minimiseCookies(undefined)).toEqual([]);
+      expect(minimiseCookies([null, { name: 'b', value: '2' }])).toEqual([{ name: 'b', value: '2' }]);
+    });
   });
 
   test('handles snapshot failures', async ({ page }) => {

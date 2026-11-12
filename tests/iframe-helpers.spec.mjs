@@ -182,6 +182,102 @@ test.describe('captureSerializedDOM filter branches', () => {
     expect(result.corsIframes.length).toBe(1);
   });
 
+  test.describe('serialized cookie strings', () => {
+    function buildCookiePage() {
+      const page = buildMockPage({
+        pageUrl: 'https://example.com/',
+        frames: [{
+          url: 'https://other.com/embed',
+          percyElementId: 'percy-iframe-1',
+          snapshot: { html: '<html><body>cross-origin</body></html>', resources: [], warnings: [], cookies: 'frame_sid=f' }
+        }]
+      });
+      const serialize = page.evaluate;
+      page.evaluate = async (fn) => {
+        const result = await serialize(fn);
+        return result && { ...result, cookies: 'page_sid=p' };
+      };
+      page.context = () => ({ cookies: async () => [{ name: 'page_sid', value: 'p', domain: 'example.com', httpOnly: true }] });
+      return page;
+    }
+
+    test.afterEach(() => {
+      delete process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES;
+      percySnapshot.resetCookieOptOutWarning();
+    });
+
+    test('replaces the page cookie string with the context cookies by default', async () => {
+      const result = await captureSerializedDOM(buildCookiePage(), {}, '');
+
+      expect(result.cookies).toEqual([{ name: 'page_sid', value: 'p', domain: 'example.com' }]);
+      expect(result.corsIframes[0].iframeSnapshot.cookies).toBe('frame_sid=f');
+    });
+
+    test('posts no cookies at all when PERCY_DO_NOT_USE_CAPTURED_COOKIES is set', async () => {
+      process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES = 'true';
+      const result = await captureSerializedDOM(buildCookiePage(), {}, '');
+
+      expect(result.cookies).toEqual([]);
+      expect(result.corsIframes).toHaveLength(1);
+      expect(JSON.stringify(result)).not.toMatch(/sid/);
+    });
+
+    // With the stringifyResponse option the serializer returns JSON strings.
+    function buildStringifiedCookiePage(frameSnapshot) {
+      const page = buildCookiePage();
+      const serialize = page.evaluate;
+      page.evaluate = async (fn) => {
+        const result = await serialize(fn);
+        return result && JSON.stringify(result);
+      };
+      page.frames()[1].evaluate = async (fn) => {
+        if (typeof fn === 'string') return undefined;
+        return frameSnapshot;
+      };
+      return page;
+    }
+
+    test('removes cookie strings from stringified snapshots when PERCY_DO_NOT_USE_CAPTURED_COOKIES is set', async () => {
+      process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES = 'true';
+      const frameSnapshot = JSON.stringify({ html: '<html></html>', resources: [], cookies: 'frame_sid=f' });
+      const result = await captureSerializedDOM(buildStringifiedCookiePage(frameSnapshot), { stringifyResponse: true }, '');
+
+      expect(typeof result).toBe('string');
+      expect(JSON.parse(result).html).toBe('<html><body>top</body></html>');
+      expect(result).not.toMatch(/sid/);
+    });
+
+    test('removes cookie strings from stringified frame snapshots when PERCY_DO_NOT_USE_CAPTURED_COOKIES is set', async () => {
+      process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES = 'true';
+      const page = buildCookiePage();
+      page.frames()[1].evaluate = async (fn) => {
+        if (typeof fn === 'string') return undefined;
+        return JSON.stringify({ html: '<html></html>', resources: [], cookies: 'frame_sid=f' });
+      };
+      const result = await captureSerializedDOM(page, {}, '');
+
+      expect(JSON.parse(result.corsIframes[0].iframeSnapshot)).toEqual({ html: '<html></html>', resources: [] });
+    });
+
+    test('leaves stringified snapshots unchanged when cookie forwarding is on', async () => {
+      const frameSnapshot = JSON.stringify({ html: '<html></html>', cookies: 'frame_sid=f' });
+      const result = await captureSerializedDOM(buildStringifiedCookiePage(frameSnapshot), { stringifyResponse: true }, '');
+
+      expect(JSON.parse(result).cookies).toBe('page_sid=p');
+    });
+
+    test('passes an unparseable stringified snapshot through when opted out', async () => {
+      process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES = 'true';
+      const page = buildCookiePage();
+      page.evaluate = async (fn) => {
+        if (typeof fn === 'function' && fn.toString().includes('PercyDOM.serialize')) return 'not json';
+        return undefined;
+      };
+
+      expect(await captureSerializedDOM(page, {}, '')).toBe('not json');
+    });
+  });
+
   test('processFrame uses page fallback when neither frame.parentFrame nor page.mainFrame yield a frame', async () => {
     // Real mainFrame at index 0; a sibling cross-origin frame with NO parentFrame method
     // and a page where mainFrame() returns null. processFrame's parent lookup must
