@@ -350,7 +350,8 @@ async function captureSerializedDOM(page, options, percyDOM) {
     // make the CLI reject the whole snapshot on validation.
     .filter(f => f && f.iframeData && f.iframeData.percyElementId);
 
-  if (processedFrames.length > 0) {
+  // A stringified snapshot (stringifyResponse) cannot carry extra properties.
+  if (processedFrames.length > 0 && domSnapshot && typeof domSnapshot === 'object') {
     domSnapshot.corsIframes = processedFrames;
   }
   // The serializer also records each document's cookie string; replace the
