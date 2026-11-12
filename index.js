@@ -355,12 +355,14 @@ async function captureSerializedDOM(page, options, percyDOM) {
   }
   // The serializer also records each document's cookie string; replace the
   // page's with the context cookies, and drop the frames' when opted out.
-  domSnapshot.cookies = await captureCookies(page);
   if (cookieForwardingDisabled()) {
+    domSnapshot = withoutCookies(domSnapshot);
     for (const frame of processedFrames) {
-      if (frame.iframeSnapshot) delete frame.iframeSnapshot.cookies;
+      frame.iframeSnapshot = withoutCookies(frame.iframeSnapshot);
     }
   }
+  const cookies = await captureCookies(page);
+  if (domSnapshot && typeof domSnapshot === 'object') domSnapshot.cookies = cookies;
   return domSnapshot;
 }
 
@@ -384,6 +386,26 @@ function minimiseCookies(cookies) {
     }
     return picked;
   });
+}
+
+// The serializer returns an object, or a JSON string when the caller passes
+// stringifyResponse; drop the document cookie string from either form. A string
+// that cannot be parsed is passed through unchanged.
+function withoutCookies(snapshot) {
+  if (typeof snapshot === 'string') {
+    try {
+      const parsed = JSON.parse(snapshot);
+      if (parsed && typeof parsed === 'object') {
+        delete parsed.cookies;
+        return JSON.stringify(parsed);
+      }
+    } catch (err) {
+      log.debug(`Could not remove cookies from the serialized DOM: ${err.message}`);
+    }
+    return snapshot;
+  }
+  if (snapshot && typeof snapshot === 'object') delete snapshot.cookies;
+  return snapshot;
 }
 
 async function captureCookies(page) {
