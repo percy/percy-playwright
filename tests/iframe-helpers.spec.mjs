@@ -209,7 +209,7 @@ test.describe('captureSerializedDOM filter branches', () => {
     test('replaces the page cookie string with the context cookies by default', async () => {
       const result = await captureSerializedDOM(buildCookiePage(), {}, '');
 
-      expect(result.cookies).toEqual([{ name: 'page_sid', value: 'p', domain: 'example.com' }]);
+      expect(result.cookies).toEqual([{ name: 'page_sid', value: 'p', domain: 'example.com', httpOnly: true }]);
       expect(result.corsIframes[0].iframeSnapshot.cookies).toBe('frame_sid=f');
     });
 

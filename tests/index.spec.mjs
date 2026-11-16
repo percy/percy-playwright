@@ -101,7 +101,7 @@ test.describe('percySnapshot', () => {
     }).toPass({ timeout: 15000 });
   });
 
-  test('forwards every browser cookie to domSnapshot, including other hosts and HttpOnly ones', async ({ page }) => {
+  test('forwards every browser cookie to domSnapshot unchanged, including other hosts and HttpOnly ones', async ({ page }) => {
     const mockCookies = [
       { name: 'session_id', value: 's3cr3t', domain: 'localhost', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax', partitionKey: 'pk' },
       { name: 'auth_token', value: 'tok', domain: '.api.example.com', path: '/', httpOnly: true, secure: true, sameSite: 'None' },
@@ -114,11 +114,7 @@ test.describe('percySnapshot', () => {
 
     await percySnapshot(page, 'Snapshot with Cookies');
 
-    expect(domSnapshot.cookies).toEqual([
-      { name: 'session_id', value: 's3cr3t', domain: 'localhost', secure: false },
-      { name: 'auth_token', value: 'tok', domain: '.api.example.com', secure: true },
-      { name: 'cdn_auth', value: 'c', domain: 'cdn.example.net', secure: true }
-    ]);
+    expect(domSnapshot.cookies).toEqual(mockCookies);
   });
 
   test('still takes the snapshot without cookies when they cannot be read', async ({ page }) => {
@@ -173,26 +169,6 @@ test.describe('percySnapshot', () => {
 
       expect(domSnapshot.cookies).toEqual([{ name: 'session_id', value: 's', domain: 'localhost' }]);
       expect(helpers.logger.stderr).not.toEqual(expect.arrayContaining([warning]));
-    });
-  });
-
-  test.describe('minimiseCookies', () => {
-    const { minimiseCookies } = percySnapshot;
-
-    test('forwards only the fields the CLI consumes', () => {
-      const cookies = [{
-        name: 'sid', value: 'v', domain: 'example.com', path: '/', expires: 10, httpOnly: true, secure: true,
-        sameSite: 'Strict', partitionKey: 'pk', sourcePort: 443, size: 4
-      }];
-
-      expect(minimiseCookies(cookies)).toEqual([{
-        name: 'sid', value: 'v', domain: 'example.com', secure: true
-      }]);
-    });
-
-    test('tolerates missing cookie lists and entries', () => {
-      expect(minimiseCookies(undefined)).toEqual([]);
-      expect(minimiseCookies([null, { name: 'b', value: '2' }])).toEqual([{ name: 'b', value: '2' }]);
     });
   });
 

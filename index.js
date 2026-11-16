@@ -367,26 +367,13 @@ async function captureSerializedDOM(page, options, percyDOM) {
   return domSnapshot;
 }
 
-// The CLI replays forwarded cookies in its discovery browser so assets behind
-// a session (including HttpOnly session cookies, and cookies for other hosts
-// such as an API or CDN domain) still load. It only reads these fields, so
-// forward nothing else. Customers can opt out of forwarding entirely with the
-// CLI's PERCY_DO_NOT_USE_CAPTURED_COOKIES setting.
-const FORWARDED_COOKIE_FIELDS = ['name', 'value', 'domain', 'secure'];
+// The CLI replays forwarded cookies in its discovery browser so pages and
+// assets behind a logged-in session load. Customers can opt out of forwarding
+// entirely with the CLI's PERCY_DO_NOT_USE_CAPTURED_COOKIES setting.
 let cookieOptOutWarned = false;
 
 function cookieForwardingDisabled() {
   return process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES?.toLowerCase() === 'true';
-}
-
-function minimiseCookies(cookies) {
-  return (cookies || []).filter(Boolean).map(cookie => {
-    const picked = {};
-    for (const field of FORWARDED_COOKIE_FIELDS) {
-      if (cookie[field] !== undefined) picked[field] = cookie[field];
-    }
-    return picked;
-  });
 }
 
 // The serializer returns an object, or a JSON string when the caller passes
@@ -421,7 +408,7 @@ async function captureCookies(page) {
   }
 
   try {
-    return minimiseCookies(await page.context().cookies());
+    return await page.context().cookies();
   } catch (err) {
     log.debug(`Could not read browser cookies: ${err.message}`);
     return [];
@@ -668,5 +655,4 @@ module.exports.captureDOM = captureDOM;
 module.exports.resolveIgnoreSelectors = resolveIgnoreSelectors;
 module.exports.isUnsupportedIframeSrc = isUnsupportedIframeSrc;
 module.exports.resolveMaxFrameDepth = resolveMaxFrameDepth;
-module.exports.minimiseCookies = minimiseCookies;
 module.exports.resetCookieOptOutWarning = () => { cookieOptOutWarned = false; };

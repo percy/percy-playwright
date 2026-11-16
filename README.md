@@ -62,9 +62,8 @@ $ percy exec -- node script.js
 
 ### Browser cookies
 
-By default the SDK sends the browser context's cookies (name, value, domain and secure flag) to the
-local Percy CLI, which uses them during asset discovery so pages and assets behind a logged-in
-session load correctly. To stop sending cookies, export `PERCY_DO_NOT_USE_CAPTURED_COOKIES=true`.
+By default the SDK sends the browser context's cookies to the local Percy CLI, which uses them
+during asset discovery so pages and assets behind a logged-in session load correctly. To stop sending cookies, export `PERCY_DO_NOT_USE_CAPTURED_COOKIES=true`.
 Pages or assets that need a session may then fail to load during asset discovery, so snapshots can
 render incorrectly; the SDK logs a warning once when this setting is active.
 
