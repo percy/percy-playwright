@@ -350,11 +350,69 @@ async function captureSerializedDOM(page, options, percyDOM) {
     // make the CLI reject the whole snapshot on validation.
     .filter(f => f && f.iframeData && f.iframeData.percyElementId);
 
-  if (processedFrames.length > 0) {
+  // A stringified snapshot (stringifyResponse) cannot carry extra properties.
+  if (processedFrames.length > 0 && domSnapshot && typeof domSnapshot === 'object') {
     domSnapshot.corsIframes = processedFrames;
   }
-  domSnapshot.cookies = await page.context().cookies();
+  // The serializer also records each document's cookie string; replace the
+  // page's with the context cookies, and drop the frames' when opted out.
+  if (cookieForwardingDisabled()) {
+    domSnapshot = withoutCookies(domSnapshot);
+    for (const frame of processedFrames) {
+      frame.iframeSnapshot = withoutCookies(frame.iframeSnapshot);
+    }
+  }
+  const cookies = await captureCookies(page);
+  if (domSnapshot && typeof domSnapshot === 'object') domSnapshot.cookies = cookies;
   return domSnapshot;
+}
+
+// The CLI replays forwarded cookies in its discovery browser so pages and
+// assets behind a logged-in session load. Customers can opt out of forwarding
+// entirely with the CLI's PERCY_DO_NOT_USE_CAPTURED_COOKIES setting.
+let cookieOptOutWarned = false;
+
+function cookieForwardingDisabled() {
+  return process.env.PERCY_DO_NOT_USE_CAPTURED_COOKIES?.toLowerCase() === 'true';
+}
+
+// The serializer returns an object, or a JSON string when the caller passes
+// stringifyResponse; drop the document cookie string from either form. A string
+// that cannot be parsed is passed through unchanged.
+function withoutCookies(snapshot) {
+  if (typeof snapshot === 'string') {
+    try {
+      const parsed = JSON.parse(snapshot);
+      if (parsed && typeof parsed === 'object') {
+        delete parsed.cookies;
+        return JSON.stringify(parsed);
+      }
+    } catch (err) {
+      log.debug(`Could not remove cookies from the serialized DOM: ${err.message}`);
+    }
+    return snapshot;
+  }
+  if (snapshot && typeof snapshot === 'object') delete snapshot.cookies;
+  return snapshot;
+}
+
+async function captureCookies(page) {
+  if (cookieForwardingDisabled()) {
+    if (!cookieOptOutWarned) {
+      cookieOptOutWarned = true;
+      log.warn('Not sending browser cookies to Percy because PERCY_DO_NOT_USE_CAPTURED_COOKIES is set. ' +
+        'Pages or assets that need a logged-in session may fail to load during asset discovery, ' +
+        'so snapshots can render incorrectly.');
+    }
+    return [];
+  }
+
+  try {
+    return await page.context().cookies();
+  } catch (err) {
+    log.debug(`Could not read browser cookies: ${err.message}`);
+    return [];
+  }
 }
 
 async function changeViewportAndWait(page, width, height, resizeCount) {
@@ -597,3 +655,4 @@ module.exports.captureDOM = captureDOM;
 module.exports.resolveIgnoreSelectors = resolveIgnoreSelectors;
 module.exports.isUnsupportedIframeSrc = isUnsupportedIframeSrc;
 module.exports.resolveMaxFrameDepth = resolveMaxFrameDepth;
+module.exports.resetCookieOptOutWarning = () => { cookieOptOutWarned = false; };
